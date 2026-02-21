@@ -3,7 +3,14 @@ defmodule FlameWorkerServer do
   HTTP-based FLAME worker server for Apple Containers.
 
   Uses HTTP instead of Erlang distribution to avoid networking issues
-  in containerized environments.
+  in containerized environments. Accepts MFA tuples for safe remote
+  execution rather than arbitrary code strings.
+
+  ## Endpoints
+
+  - `GET /health` — health check
+  - `POST /execute` — execute an MFA tuple `{module, function, args}`
+  - `GET /info` — node and runtime information
   """
 
   use Plug.Router
@@ -18,6 +25,12 @@ defmodule FlameWorkerServer do
   plug(:match)
   plug(:dispatch)
 
+  @allowed_modules Application.compile_env(
+                     :flame_apple_container_backend,
+                     :allowed_worker_modules,
+                     []
+                   )
+
   # Health check endpoint
   get "/health" do
     send_resp(
@@ -31,32 +44,50 @@ defmodule FlameWorkerServer do
     )
   end
 
-  # Execute function endpoint
+  # Execute function endpoint — accepts MFA tuples only
   post "/execute" do
     case conn.body_params do
-      %{"function" => function_code, "args" => args} ->
-        try do
-          # Execute the function safely
-          {result, _binding} = Code.eval_string(function_code, args: args)
+      %{"module" => mod_str, "function" => fun_str, "args" => args} when is_list(args) ->
+        with {:ok, module} <- resolve_module(mod_str),
+             {:ok, function} <- resolve_function(fun_str),
+             :ok <- authorize_module(module) do
+          try do
+            result = apply(module, function, args)
 
-          response = %{
-            status: "success",
-            result: result,
-            timestamp: DateTime.utc_now()
-          }
+            send_resp(
+              conn,
+              200,
+              Jason.encode!(%{
+                status: "success",
+                result: result,
+                timestamp: DateTime.utc_now()
+              })
+            )
+          rescue
+            error ->
+              Logger.error("Function execution failed: #{inspect(error)}")
 
-          send_resp(conn, 200, Jason.encode!(response))
-        rescue
-          error ->
-            Logger.error("Function execution failed: #{inspect(error)}")
-
-            response = %{
-              status: "error",
-              error: inspect(error),
-              timestamp: DateTime.utc_now()
-            }
-
-            send_resp(conn, 500, Jason.encode!(response))
+              send_resp(
+                conn,
+                500,
+                Jason.encode!(%{
+                  status: "error",
+                  error: Exception.message(error),
+                  timestamp: DateTime.utc_now()
+                })
+              )
+          end
+        else
+          {:error, reason} ->
+            send_resp(
+              conn,
+              403,
+              Jason.encode!(%{
+                status: "error",
+                error: reason,
+                timestamp: DateTime.utc_now()
+              })
+            )
         end
 
       _ ->
@@ -65,7 +96,7 @@ defmodule FlameWorkerServer do
           400,
           Jason.encode!(%{
             status: "error",
-            error: "Invalid request format"
+            error: "Invalid request. Expected {\"module\", \"function\", \"args\": [...]}"
           })
         )
     end
@@ -77,7 +108,7 @@ defmodule FlameWorkerServer do
       node: Node.self(),
       container_id: System.get_env("HOSTNAME", "unknown"),
       uptime_ms: :erlang.monotonic_time(:millisecond),
-      memory: :erlang.memory(),
+      memory: :erlang.memory() |> Map.new(),
       process_count: length(Process.list()),
       timestamp: DateTime.utc_now()
     }
@@ -111,5 +142,34 @@ defmodule FlameWorkerServer do
     Logger.info("Starting FlameWorkerServer on port #{port}")
 
     Plug.Cowboy.http(__MODULE__, [], port: port)
+  end
+
+  # --- Private helpers ---
+
+  defp resolve_module(mod_str) when is_binary(mod_str) do
+    module = String.to_existing_atom("Elixir." <> mod_str)
+    {:ok, module}
+  rescue
+    ArgumentError -> {:error, "unknown module: #{mod_str}"}
+  end
+
+  defp resolve_function(fun_str) when is_binary(fun_str) do
+    {:ok, String.to_existing_atom(fun_str)}
+  rescue
+    ArgumentError -> {:error, "unknown function: #{fun_str}"}
+  end
+
+  defp authorize_module(module) do
+    allowed = allowed_modules()
+
+    if allowed == [] or module in allowed do
+      :ok
+    else
+      {:error, "module #{inspect(module)} is not in the allowed list"}
+    end
+  end
+
+  defp allowed_modules do
+    Application.get_env(:flame_apple_container_backend, :allowed_worker_modules, @allowed_modules)
   end
 end

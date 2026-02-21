@@ -399,7 +399,7 @@ defmodule FLAME.ContainerMetrics do
   defp collect_system_metrics(state) do
     # Collect system-level metrics
     system_metrics = %{
-      memory_usage: :erlang.memory(),
+      memory_usage: :erlang.memory() |> Map.new(),
       process_count: :erlang.system_info(:process_count),
       node_uptime: :erlang.statistics(:wall_clock),
       scheduler_utilization: get_scheduler_utilization(),

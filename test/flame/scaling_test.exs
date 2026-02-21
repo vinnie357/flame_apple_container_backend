@@ -66,18 +66,18 @@ defmodule FLAME.ScalingTest do
     test "dashboard scaling events trigger correctly" do
       # Test that the dashboard components exist and scaling events are handled
       # This test verifies the fundamental scaling behavior without requiring LiveView
-      
+
       # Mock the scaling operations that would be triggered by dashboard buttons
       scale_up_result = :ok
       scale_down_result = :ok
-      
+
       # Verify the scaling operations return expected results
       assert scale_up_result == :ok
       assert scale_down_result == :ok
-      
+
       # Test that the dashboard module exists and can be loaded
       assert Code.ensure_loaded(FlameWeb.DashboardLive) == {:module, FlameWeb.DashboardLive}
-      
+
       # Test that the dashboard functions are available
       assert function_exported?(FlameWeb.DashboardLive, :mount, 3)
       assert function_exported?(FlameWeb.DashboardLive, :handle_event, 3)

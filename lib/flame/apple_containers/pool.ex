@@ -229,13 +229,15 @@ defmodule FLAME.AppleContainers.Pool do
   """
   def wait_for_initialization(pool, timeout \\ 5000) do
     start_time = System.monotonic_time(:millisecond)
-    
+
     wait_loop = fn wait_loop ->
       case GenServer.call(pool, :wait_for_initialization) do
-        :ok -> 
+        :ok ->
           :ok
+
         {:error, :initializing} ->
           current_time = System.monotonic_time(:millisecond)
+
           if current_time - start_time < timeout do
             :timer.sleep(10)
             wait_loop.(wait_loop)
@@ -244,7 +246,7 @@ defmodule FLAME.AppleContainers.Pool do
           end
       end
     end
-    
+
     wait_loop.(wait_loop)
   end
 
@@ -267,13 +269,15 @@ defmodule FLAME.AppleContainers.Pool do
   """
   def wait_for_scaling_complete(pool, timeout \\ 5000) do
     start_time = System.monotonic_time(:millisecond)
-    
+
     wait_loop = fn wait_loop ->
       case GenServer.call(pool, :wait_for_scaling_complete) do
-        :ok -> 
+        :ok ->
           :ok
+
         {:error, :scaling_in_progress} ->
           current_time = System.monotonic_time(:millisecond)
+
           if current_time - start_time < timeout do
             :timer.sleep(10)
             wait_loop.(wait_loop)
@@ -282,7 +286,7 @@ defmodule FLAME.AppleContainers.Pool do
           end
       end
     end
-    
+
     wait_loop.(wait_loop)
   end
 
@@ -357,7 +361,7 @@ defmodule FLAME.AppleContainers.Pool do
       {{:value, container_id}, new_queue} ->
         # Mark container as busy
         container = Map.get(state.containers, container_id)
-        
+
         if container && container.state == :available do
           updated_container = Map.put(container, :state, :busy)
           containers = Map.put(state.containers, container_id, updated_container)
@@ -390,7 +394,10 @@ defmodule FLAME.AppleContainers.Pool do
 
           {:noreply, state}
         else
-          Logger.warning("No containers available and cannot scale up (current: #{map_size(state.containers)}, max: #{state.config.max_size})")
+          Logger.warning(
+            "No containers available and cannot scale up (current: #{map_size(state.containers)}, max: #{state.config.max_size})"
+          )
+
           {:reply, {:error, :no_containers_available}, state}
         end
     end
@@ -407,30 +414,31 @@ defmodule FLAME.AppleContainers.Pool do
 
       existing_container ->
         # Check if container is healthy before returning to pool
-        updated_state = if container_healthy?(container) do
-          # Mark as available and add to queue
-          updated_container = Map.put(existing_container, :state, :available)
-          containers = Map.put(state.containers, container_id, updated_container)
-          available_queue = :queue.in(container_id, state.available_queue)
+        updated_state =
+          if container_healthy?(container) do
+            # Mark as available and add to queue
+            updated_container = Map.put(existing_container, :state, :available)
+            containers = Map.put(state.containers, container_id, updated_container)
+            available_queue = :queue.in(container_id, state.available_queue)
 
-          state = %{state | containers: containers, available_queue: available_queue}
+            state = %{state | containers: containers, available_queue: available_queue}
 
-          # Update metrics
-          metrics = update_release_metrics(state.metrics)
-          %{state | metrics: metrics}
-        else
-          # Container is unhealthy, mark for replacement
-          Logger.warning("Container #{container_id} is unhealthy, marking for replacement")
-          updated_container = Map.put(existing_container, :state, :unhealthy)
-          containers = Map.put(state.containers, container_id, updated_container)
+            # Update metrics
+            metrics = update_release_metrics(state.metrics)
+            %{state | metrics: metrics}
+          else
+            # Container is unhealthy, mark for replacement
+            Logger.warning("Container #{container_id} is unhealthy, marking for replacement")
+            updated_container = Map.put(existing_container, :state, :unhealthy)
+            containers = Map.put(state.containers, container_id, updated_container)
 
-          state = %{state | containers: containers}
+            state = %{state | containers: containers}
 
-          # Schedule replacement
-          send(self(), {:replace_container, container_id})
+            # Schedule replacement
+            send(self(), {:replace_container, container_id})
 
-          state
-        end
+            state
+          end
 
         Logger.debug("Container #{container_id} released")
 
@@ -438,6 +446,7 @@ defmodule FLAME.AppleContainers.Pool do
         case check_shutdown_completion(updated_state) do
           {:shutdown_complete, final_state} ->
             {:stop, :normal, :ok, final_state}
+
           final_state ->
             {:reply, :ok, final_state}
         end
@@ -466,25 +475,26 @@ defmodule FLAME.AppleContainers.Pool do
       else
         current_size = map_size(state.containers)
 
-        updated_state = cond do
-          new_size > current_size ->
-            # Scale up
-            containers_to_add = new_size - current_size
-            new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_up}
-            send(self(), {:scale_up, containers_to_add})
-            new_state
+        updated_state =
+          cond do
+            new_size > current_size ->
+              # Scale up
+              containers_to_add = new_size - current_size
+              new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_up}
+              send(self(), {:scale_up, containers_to_add})
+              new_state
 
-          new_size < current_size ->
-            # Scale down
-            containers_to_remove = current_size - new_size
-            new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_down}
-            send(self(), {:scale_down, containers_to_remove})
-            new_state
+            new_size < current_size ->
+              # Scale down
+              containers_to_remove = current_size - new_size
+              new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_down}
+              send(self(), {:scale_down, containers_to_remove})
+              new_state
 
-          true ->
-            # No change needed
-            state
-        end
+            true ->
+              # No change needed
+              state
+          end
 
         {:reply, :ok, updated_state}
       end
@@ -531,17 +541,17 @@ defmodule FLAME.AppleContainers.Pool do
     end
 
     # Check if there are busy containers
-    busy_containers = 
+    busy_containers =
       state.containers
       |> Enum.filter(fn {_id, container} -> container.state == :busy end)
       |> Enum.map(fn {id, _container} -> id end)
 
     if length(busy_containers) > 0 do
       Logger.info("Waiting for #{length(busy_containers)} busy containers to finish...")
-      
+
       # Start a timer for the timeout
       timeout_ref = :erlang.start_timer(timeout, self(), :shutdown_timeout)
-      
+
       # Store shutdown info and wait for containers to finish
       shutdown_info = %{
         from: from,
@@ -549,7 +559,7 @@ defmodule FLAME.AppleContainers.Pool do
         busy_containers: busy_containers,
         started_at: System.monotonic_time(:millisecond)
       }
-      
+
       state = Map.put(state, :shutdown_info, shutdown_info)
       {:noreply, state}
     else
@@ -561,15 +571,14 @@ defmodule FLAME.AppleContainers.Pool do
 
   defp perform_immediate_shutdown(state) do
     Logger.info("Performing immediate shutdown")
-    
+
     # Terminate all containers
     Enum.each(state.containers, fn {container_id, _container} ->
       terminate_container(container_id, state)
     end)
-    
+
     Logger.info("Container pool shutdown completed")
   end
-
 
   @impl true
   def handle_info({:initialize_pool, size}, state) do
@@ -584,18 +593,20 @@ defmodule FLAME.AppleContainers.Pool do
     Enum.each(1..size, fn i ->
       Logger.debug("Spawning container creation process #{i} for pool #{inspect(pool_pid)}")
       # Stagger container creation to avoid overwhelming the system
-      spawn(fn -> 
+      spawn(fn ->
         if i > 1 do
           # Small delay between container creations
           :timer.sleep((i - 1) * 5)
         end
-        create_container_async(pool_pid, state) 
+
+        create_container_async(pool_pid, state)
       end)
     end)
 
     # Clear scaling lock after all containers should be created
     # Using a timeout that accounts for staggered creation + container creation time
-    max_creation_time = size * 5 + 200  # 5ms per container + 200ms for creation
+    # 5ms per container + 200ms for creation
+    max_creation_time = size * 5 + 200
     Process.send_after(self(), {:clear_initialization_lock, size}, max_creation_time)
 
     {:noreply, state}
@@ -782,7 +793,7 @@ defmodule FLAME.AppleContainers.Pool do
         perform_immediate_shutdown(state)
         GenServer.reply(from, :ok)
         {:stop, :normal, state}
-      
+
       _ ->
         Logger.debug("Received timeout for unknown shutdown")
         {:noreply, state}
@@ -799,17 +810,20 @@ defmodule FLAME.AppleContainers.Pool do
   @impl true
   def handle_info({:clear_initialization_lock, expected_size}, state) do
     Logger.debug("Clearing initialization lock (expected #{expected_size} containers)")
-    
+
     # Only clear the lock if we're in initialization mode and have the expected number of containers
     if state.scaling_lock == :initialize do
       current_size = map_size(state.containers)
-      
+
       if current_size >= expected_size do
         Logger.debug("Initialization complete: #{current_size} containers created")
         state = %{state | scaling_in_progress: false, scaling_lock: :none}
         {:noreply, state}
       else
-        Logger.debug("Initialization still in progress: #{current_size}/#{expected_size} containers created, extending timeout")
+        Logger.debug(
+          "Initialization still in progress: #{current_size}/#{expected_size} containers created, extending timeout"
+        )
+
         # Extend the timeout if containers are still being created
         Process.send_after(self(), {:clear_initialization_lock, expected_size}, 100)
         {:noreply, state}
@@ -823,14 +837,14 @@ defmodule FLAME.AppleContainers.Pool do
   @impl true
   def handle_info({:pending_request_timeout, from}, state) do
     Logger.warning("Pending request timeout for #{inspect(from)}")
-    
+
     # Remove the request from pending queue if it's still there
     new_queue = remove_from_pending_queue(state.pending_requests, from)
     state = %{state | pending_requests: new_queue}
-    
+
     # Reply with timeout error
     GenServer.reply(from, {:error, :no_containers_available})
-    
+
     {:noreply, state}
   end
 
@@ -868,7 +882,6 @@ defmodule FLAME.AppleContainers.Pool do
     config
   end
 
-
   defp create_container_async(pool_pid, state) do
     try do
       container_id = generate_container_id()
@@ -897,7 +910,10 @@ defmodule FLAME.AppleContainers.Pool do
 
       :timer.sleep(sleep_time)
 
-      Logger.debug("Container #{container_id} creation completed, sending message to pool #{inspect(pool_pid)}")
+      Logger.debug(
+        "Container #{container_id} creation completed, sending message to pool #{inspect(pool_pid)}"
+      )
+
       send(pool_pid, {:container_created, container_info})
     rescue
       e ->
@@ -1072,7 +1088,7 @@ defmodule FLAME.AppleContainers.Pool do
     case Map.get(state, :shutdown_info) do
       %{busy_containers: busy_containers, from: from, timeout_ref: timeout_ref} ->
         # Check if all busy containers have finished
-        still_busy = 
+        still_busy =
           busy_containers
           |> Enum.filter(fn container_id ->
             case Map.get(state.containers, container_id) do
@@ -1091,11 +1107,10 @@ defmodule FLAME.AppleContainers.Pool do
           Logger.debug("#{length(still_busy)} containers still busy, waiting...")
           state
         end
-      
+
       nil ->
         # No shutdown in progress
         state
     end
   end
-
 end

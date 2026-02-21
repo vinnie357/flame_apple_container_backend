@@ -25,7 +25,7 @@ defmodule FlameWeb.ConnCase do
         {:error, {:already_started, :floki}} -> :ok
         {:error, _} -> :ok
       end
-      
+
       # Import conveniences for testing with connections
       import Plug.Conn
       import Phoenix.ConnTest

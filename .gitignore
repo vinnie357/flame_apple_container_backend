@@ -8,13 +8,16 @@
 *.beam
 erl_crash.dump
 
-# Generated files
+# Generated files and package builds (built via "mix hex.build")
 *.tar.gz
+flame_apple_container_backend-*.tar
+flame_apple_container_backend-*/
 
 # Config secrets
 /config/*.secret.exs
 .env
 .env.*
+!.env.example
 
 # Elixir Language Server
 .elixir_ls/
@@ -35,3 +38,6 @@ Thumbs.db
 
 # Log files
 *.log
+
+# Beads task management
+.beads.sqlite

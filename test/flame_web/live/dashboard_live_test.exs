@@ -9,11 +9,13 @@ defmodule FlameWeb.DashboardLiveTest do
     # Force load Floki module by adding its path to the code path
     floki_path = Path.join([File.cwd!(), "_build", "test", "lib", "floki", "ebin"])
     Code.prepend_path(floki_path)
-    
+
     # Now try to load Floki
     case Code.ensure_loaded(Floki) do
-      {:module, _} -> :ok
-      {:error, _} -> 
+      {:module, _} ->
+        :ok
+
+      {:error, _} ->
         # Skip tests that require Floki if it's not available
         {:skip, "Floki not available for LiveView tests"}
     end

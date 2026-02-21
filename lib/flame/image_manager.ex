@@ -663,37 +663,82 @@ defmodule FLAME.ImageManager do
     end)
   end
 
-  defp perform_image_build(build_spec, _build_config) do
+  defp perform_image_build(build_spec, build_config) do
     Logger.info("Starting build for #{build_spec.name}")
 
-    # Simulate build process
-    # Simulate build time
-    Process.sleep(5000)
+    image_tag = "#{build_spec.name}:#{generate_version()}"
 
-    # In a real implementation, this would:
-    # 1. Clone/download source code
-    # 2. Build container image using Apple Containers
-    # 3. Tag and push to registry
-    # 4. Return build metadata
+    # Try real container CLI build first
+    case try_container_cli_build(build_spec, build_config, image_tag) do
+      {:ok, _} = result ->
+        result
 
-    build_logs = [
-      "Starting build process...",
-      "Downloading source from #{build_spec.source.url}",
-      "Building container image...",
-      "Build completed successfully"
-    ]
+      {:error, :cli_not_available} ->
+        # Fall back to configurable build callback
+        case Map.get(build_config, :build_fn) do
+          build_fn when is_function(build_fn, 2) ->
+            Logger.info("Using configured build callback for #{build_spec.name}")
+            build_fn.(build_spec, build_config)
 
-    metadata = %{
-      image_tag: "#{build_spec.name}:#{generate_version()}",
-      build_platform: "darwin/arm64",
-      layers: 12,
-      size_bytes: 256_000_000
-    }
+          _ ->
+            # No real build mechanism available; return simulated result with warning
+            Logger.warning(
+              "No build mechanism available for #{build_spec.name}. " <>
+                "Returning simulated result. Configure build_config[:build_fn] or " <>
+                "install the `container` CLI to perform real builds."
+            )
 
-    {:ok, %{logs: build_logs, metadata: metadata}}
+            build_logs = [
+              "[simulated] Starting build process...",
+              "[simulated] Build completed (no real build performed)"
+            ]
+
+            metadata = %{
+              image_tag: image_tag,
+              build_platform: "darwin/arm64",
+              simulated: true
+            }
+
+            {:ok, %{logs: build_logs, metadata: metadata}}
+        end
+    end
   rescue
     error ->
       {:error, "Build failed: #{inspect(error)}"}
+  end
+
+  defp try_container_cli_build(build_spec, build_config, image_tag) do
+    dockerfile = Map.get(build_config, :dockerfile_path, "Dockerfile.flame")
+    context = Map.get(build_config, :build_context, ".")
+
+    args = ["build", "--tag", image_tag, "--file", dockerfile, context]
+
+    case System.find_executable("container") do
+      nil ->
+        {:error, :cli_not_available}
+
+      _path ->
+        Logger.info("Building image #{image_tag} with `container` CLI")
+
+        case System.cmd("container", args, stderr_to_stdout: true) do
+          {output, 0} ->
+            build_logs =
+              output
+              |> String.split("\n", trim: true)
+
+            metadata = %{
+              image_tag: image_tag,
+              build_platform: "darwin/arm64",
+              source: build_spec.source,
+              simulated: false
+            }
+
+            {:ok, %{logs: build_logs, metadata: metadata}}
+
+          {output, exit_code} ->
+            {:error, "container build exited with code #{exit_code}: #{output}"}
+        end
+    end
   end
 
   defp spawn_scan_process(image_id, image_info, scanner_config) do
@@ -711,68 +756,133 @@ defmodule FLAME.ImageManager do
     else
       Logger.info("Starting security scan for #{image_info.name}:#{image_info.version}")
 
-      # Simulate scan process
-      Process.sleep(3000)
+      case Map.get(scanner_config, :command) do
+        command when is_binary(command) and command != "" ->
+          run_scanner_command(command, image_info, scanner_config)
 
-      # In a real implementation, this would:
-      # 1. Run vulnerability scanner (Trivy, Clair, etc.)
-      # 2. Parse scan results
-      # 3. Apply security policies
-      # 4. Return structured vulnerability data
+        _ ->
+          Logger.warning(
+            "No security scanner command configured for #{image_info.name}:#{image_info.version}. " <>
+              "Configure scanner_config[:command] to run a real scanner (e.g., trivy, grype). " <>
+              "Reporting zero vulnerabilities."
+          )
 
-      scan_results = %{
-        scanner: scanner_config.scanner,
-        scan_time: System.system_time(:millisecond),
-        vulnerabilities: %{
-          critical: :rand.uniform(2),
-          high: :rand.uniform(5),
-          medium: :rand.uniform(10),
-          low: :rand.uniform(20)
-        },
-        compliance: %{
-          cis_benchmark: :passed,
-          pci_dss: :passed,
-          soc2: :passed
-        },
-        secrets_detected: [],
-        malware_detected: false
-      }
+          scan_results = %{
+            scanner: scanner_config.scanner,
+            scan_time: System.system_time(:millisecond),
+            vulnerabilities: %{critical: 0, high: 0, medium: 0, low: 0},
+            compliance: %{},
+            secrets_detected: [],
+            malware_detected: false,
+            simulated: true
+          }
 
-      {:ok, scan_results}
+          {:ok, scan_results}
+      end
     end
   rescue
     error ->
       {:error, "Security scan failed: #{inspect(error)}"}
   end
 
-  defp perform_blue_green_deployment(image_info, _deployment_config) do
+  defp run_scanner_command(command, image_info, scanner_config) do
+    image_tag =
+      get_in(image_info.metadata, [:image_tag]) || "#{image_info.name}:#{image_info.version}"
+
+    [cmd | args] = String.split(command, " ", trim: true)
+    args = args ++ [image_tag]
+
+    case System.find_executable(cmd) do
+      nil ->
+        Logger.warning(
+          "Scanner command `#{cmd}` not found on PATH. " <>
+            "Reporting zero vulnerabilities for #{image_info.name}:#{image_info.version}."
+        )
+
+        {:ok,
+         %{
+           scanner: scanner_config.scanner,
+           scan_time: System.system_time(:millisecond),
+           vulnerabilities: %{critical: 0, high: 0, medium: 0, low: 0},
+           compliance: %{},
+           secrets_detected: [],
+           malware_detected: false,
+           simulated: true
+         }}
+
+      _path ->
+        Logger.info("Running scanner: #{cmd} #{Enum.join(args, " ")}")
+
+        case System.cmd(cmd, args, stderr_to_stdout: true) do
+          {output, 0} ->
+            scan_results = %{
+              scanner: scanner_config.scanner,
+              scan_time: System.system_time(:millisecond),
+              vulnerabilities: parse_scanner_output(output, scanner_config.scanner),
+              raw_output: output,
+              compliance: %{},
+              secrets_detected: [],
+              malware_detected: false,
+              simulated: false
+            }
+
+            {:ok, scan_results}
+
+          {output, exit_code} ->
+            Logger.error("Scanner exited with code #{exit_code}: #{output}")
+            {:error, "Security scan exited with code #{exit_code}"}
+        end
+    end
+  end
+
+  defp parse_scanner_output(output, _scanner_type) do
+    # Default parser: count severity keywords in output.
+    # Override with a custom scanner_config[:parse_fn] for real parsing.
+    lines = String.split(output, "\n")
+
+    %{
+      critical: Enum.count(lines, &String.contains?(String.downcase(&1), "critical")),
+      high: Enum.count(lines, &String.contains?(String.downcase(&1), "high")),
+      medium: Enum.count(lines, &String.contains?(String.downcase(&1), "medium")),
+      low: Enum.count(lines, &String.contains?(String.downcase(&1), "low"))
+    }
+  end
+
+  defp perform_blue_green_deployment(image_info, deployment_config) do
     Logger.info("Starting blue-green deployment for #{image_info.name}:#{image_info.version}")
 
-    # Simulate deployment process
-    Process.sleep(2000)
+    case Map.get(deployment_config, :deploy_fn) do
+      deploy_fn when is_function(deploy_fn, 2) ->
+        Logger.info(
+          "Using configured deployment callback for #{image_info.name}:#{image_info.version}"
+        )
 
-    # In a real implementation, this would:
-    # 1. Create new containers with the new image
-    # 2. Run health checks
-    # 3. Gradually shift traffic from old to new containers
-    # 4. Monitor for issues and rollback if needed
-    # 5. Clean up old containers
+        deploy_fn.(image_info, deployment_config)
 
-    deployment_result = %{
-      containers_created: 3,
-      health_checks_passed: true,
-      traffic_shifted: 100,
-      old_containers_terminated: 2,
-      deployment_time_ms: 2000
-    }
+      _ ->
+        Logger.warning(
+          "No deployment callback configured for #{image_info.name}:#{image_info.version}. " <>
+            "Configure deployment_config[:deploy_fn] to perform real deployments. " <>
+            "No actual deployment was performed."
+        )
 
-    {:ok, deployment_result}
+        deployment_result = %{
+          containers_created: 0,
+          health_checks_passed: false,
+          traffic_shifted: 0,
+          old_containers_terminated: 0,
+          deployment_time_ms: 0,
+          simulated: true
+        }
+
+        {:ok, deployment_result}
+    end
   rescue
     error ->
       {:error, "Deployment failed: #{inspect(error)}"}
   end
 
-  defp perform_rollback(_deployment_record, target_image_id, state) do
+  defp perform_rollback(deployment_record, target_image_id, state) do
     Logger.info("Starting rollback to image #{target_image_id}")
 
     case Map.get(state.images, target_image_id) do
@@ -780,17 +890,33 @@ defmodule FLAME.ImageManager do
         {:error, :target_image_not_found}
 
       target_image ->
-        # Simulate rollback process
-        Process.sleep(1000)
+        # Check for a configurable rollback callback in the deployment record's config
+        rollback_fn =
+          get_in(deployment_record, [:config, :rollback_fn]) ||
+            get_in(deployment_record, [:config, "rollback_fn"])
 
-        rollback_result = %{
-          containers_created: 2,
-          containers_terminated: 3,
-          rollback_time_ms: 1000,
-          target_image: "#{target_image.name}:#{target_image.version}"
-        }
+        case rollback_fn do
+          f when is_function(f, 2) ->
+            Logger.info("Using configured rollback callback for image #{target_image_id}")
+            f.(deployment_record, target_image)
 
-        {:ok, rollback_result}
+          _ ->
+            Logger.warning(
+              "No rollback callback configured for deployment #{deployment_record.id}. " <>
+                "Configure deployment_config[:rollback_fn] to perform real rollbacks. " <>
+                "No actual rollback was performed."
+            )
+
+            rollback_result = %{
+              containers_created: 0,
+              containers_terminated: 0,
+              rollback_time_ms: 0,
+              target_image: "#{target_image.name}:#{target_image.version}",
+              simulated: true
+            }
+
+            {:ok, rollback_result}
+        end
     end
   rescue
     error ->
@@ -835,14 +961,11 @@ defmodule FLAME.ImageManager do
       "Promoting #{image_info.name}:#{image_info.version} from #{from_stage} to #{to_stage}"
     )
 
-    # Simulate promotion process
-    Process.sleep(1000)
-
     promotion_result = %{
       from_stage: from_stage,
       to_stage: to_stage,
       validation_passed: true,
-      promotion_time_ms: 1000
+      promotion_time_ms: 0
     }
 
     {:ok, promotion_result}

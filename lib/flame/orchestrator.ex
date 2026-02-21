@@ -739,8 +739,61 @@ defmodule FLAME.Orchestrator do
     "workflow-#{System.system_time(:millisecond)}-#{:rand.uniform(999_999)}"
   end
 
-  defp has_data_locality(_task_spec, _cluster), do: false
-  defp has_sufficient_resources(_cluster, _requirements), do: true
-  defp container_has_capacity(_container, _cluster_info), do: true
-  defp get_container_current_load(_container), do: :rand.uniform(100)
+  defp has_data_locality(task_spec, cluster) do
+    preferred = task_spec[:data_locality] || task_spec[:preferred_cluster]
+
+    case preferred do
+      nil -> false
+      cluster_id when is_binary(cluster_id) -> cluster.cluster_id == cluster_id
+      cluster_id -> cluster.cluster_id == cluster_id
+    end
+  end
+
+  defp has_sufficient_resources(_cluster, requirements) when requirements == %{}, do: true
+
+  defp has_sufficient_resources(cluster, requirements) do
+    available = cluster.spec[:resource_requirements] || %{}
+
+    if available == %{} do
+      # No resource information on the cluster; assume sufficient
+      true
+    else
+      Enum.all?(requirements, fn {resource, required_amount} ->
+        case Map.get(available, resource) do
+          nil -> true
+          cluster_amount -> cluster_amount >= required_amount
+        end
+      end)
+    end
+  end
+
+  defp container_has_capacity(container, cluster_info) do
+    max_concurrency = cluster_info.spec[:max_concurrency]
+
+    if is_nil(max_concurrency) do
+      true
+    else
+      container_id = container.container_id
+
+      current_task_count =
+        Enum.count(cluster_info.task_assignments, fn {_task_id, assignment} ->
+          assignment[:container_id] == container_id
+        end)
+
+      current_task_count < max_concurrency
+    end
+  end
+
+  defp get_container_current_load(container) do
+    task_count = Map.get(container, :task_count, nil)
+    scheduled = Map.get(container, :scheduled_tasks, nil)
+    processes = Map.get(container, :process_count, nil)
+
+    cond do
+      is_number(task_count) -> task_count
+      is_number(scheduled) -> scheduled
+      is_number(processes) -> processes
+      true -> 0
+    end
+  end
 end

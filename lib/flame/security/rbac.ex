@@ -390,45 +390,18 @@ defmodule FLAME.Security.RBAC do
 
   # Private implementation
 
-  defp authenticate_user_impl(username, password, _opts) do
-    # In production, this would integrate with your authentication system
-    # For now, we'll use a simple demo implementation
-    case {username, password} do
-      {"admin", "admin123"} ->
-        {:ok,
-         %{
-           id: "admin",
-           username: "admin",
-           email: "admin@example.com",
-           roles: ["admin"],
-           metadata: %{
-             created_at: DateTime.utc_now(),
-             last_login: DateTime.utc_now()
-           }
-         }}
+  defp authenticate_user_impl(username, password, opts) do
+    case Application.get_env(:flame_apple_container_backend, :auth_adapter) do
+      nil ->
+        Logger.warning(
+          "No auth adapter configured. Set :auth_adapter in :flame_apple_container_backend app config " <>
+            "to a module implementing authenticate/3."
+        )
 
-      {"operator", "operator123"} ->
-        {:ok,
-         %{
-           id: "operator",
-           username: "operator",
-           email: "operator@example.com",
-           roles: ["operator"],
-           metadata: %{}
-         }}
+        {:error, :auth_adapter_not_configured}
 
-      {"developer", "dev123"} ->
-        {:ok,
-         %{
-           id: "developer",
-           username: "developer",
-           email: "dev@example.com",
-           roles: ["developer"],
-           metadata: %{}
-         }}
-
-      _ ->
-        {:error, :invalid_credentials}
+      adapter when is_atom(adapter) ->
+        adapter.authenticate(username, password, opts)
     end
   end
 

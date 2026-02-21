@@ -25,7 +25,8 @@ defmodule FLAME.ClusterManager do
     :health_checks,
     :load_balancer,
     :failover_policies,
-    :metrics_aggregator
+    :metrics_aggregator,
+    :failover_callback
   ]
 
   # 30 seconds
@@ -121,7 +122,8 @@ defmodule FLAME.ClusterManager do
       health_checks: %{},
       load_balancer: initialize_load_balancer(cluster_config.load_balancing_strategy),
       failover_policies: initialize_failover_policies(opts),
-      metrics_aggregator: initialize_metrics_aggregator()
+      metrics_aggregator: initialize_metrics_aggregator(),
+      failover_callback: Keyword.get(opts, :failover_callback)
     }
 
     # Register local cluster
@@ -301,7 +303,7 @@ defmodule FLAME.ClusterManager do
 
       {from_info, to_info} ->
         # Perform failover
-        case perform_failover(from_info, to_info) do
+        case perform_failover(from_info, to_info, state) do
           :ok ->
             # Update cluster status
             state = put_in(state.clusters[from_cluster].status, :failed)
@@ -521,8 +523,7 @@ defmodule FLAME.ClusterManager do
 
     headers = build_auth_headers(credentials)
 
-    # Mock HTTP implementation since HTTPoison is not available
-    case mock_http_get(url, headers) do
+    case http_get(url, headers) do
       {:ok, %{status_code: 200}} -> :ok
       _ -> :error
     end
@@ -699,18 +700,21 @@ defmodule FLAME.ClusterManager do
     max(0, 100 - container_count * 5)
   end
 
-  defp perform_failover(from_cluster, to_cluster) do
+  defp perform_failover(from_cluster, to_cluster, state) do
     Logger.info("Performing failover from #{from_cluster.id} to #{to_cluster.id}")
 
-    # This would implement actual failover logic:
-    # 1. Migrate running tasks
-    # 2. Update DNS/load balancer configuration
-    # 3. Notify monitoring systems
-    # 4. Update cluster routing tables
+    if is_function(state.failover_callback, 2) do
+      state.failover_callback.(from_cluster, to_cluster)
+    else
+      Logger.info(
+        "Failover action: migrating workloads from cluster #{from_cluster.id} " <>
+          "(type=#{from_cluster.type}, status=#{from_cluster.status}) " <>
+          "to cluster #{to_cluster.id} " <>
+          "(type=#{to_cluster.type}, status=#{to_cluster.status})"
+      )
 
-    # For now, we'll simulate successful failover
-    Process.sleep(1000)
-    :ok
+      :ok
+    end
   end
 
   defp perform_all_health_checks(state) do
@@ -904,15 +908,72 @@ defmodule FLAME.ClusterManager do
     end
   end
 
-  defp execute_remote_task(_task_function, _cluster_info, _options) do
-    # This would implement remote task execution
-    # For now, simulate remote execution
-    Process.sleep(100)
-    {:ok, "remote_task_result"}
+  defp execute_remote_task(task_function, cluster_info, options) do
+    remote_executor = options[:remote_executor]
+
+    cond do
+      is_function(remote_executor, 3) ->
+        # Use a caller-supplied callback for remote execution
+        try do
+          result = remote_executor.(task_function, cluster_info, options)
+          {:ok, result}
+        rescue
+          error -> {:error, {:remote_execution_failed, error}}
+        end
+
+      is_atom(cluster_info[:flame_pool]) and not is_nil(cluster_info[:flame_pool]) ->
+        # Delegate to a FLAME pool configured for this remote cluster
+        try do
+          result = FLAME.call(cluster_info.flame_pool, task_function)
+          {:ok, result}
+        rescue
+          error -> {:error, {:remote_flame_call_failed, error}}
+        end
+
+      not is_nil(cluster_info[:endpoints]) ->
+        # Use :rpc.call to execute on the first reachable remote node
+        execute_on_remote_endpoint(task_function, cluster_info.endpoints, options)
+
+      true ->
+        {:error, :no_remote_execution_strategy}
+    end
   end
 
-  defp mock_http_get(_url, _headers) do
-    # Mock HTTP implementation for testing
-    {:ok, %{status_code: 200}}
+  defp execute_on_remote_endpoint(_task_function, [], _options) do
+    {:error, :all_remote_endpoints_unreachable}
+  end
+
+  defp execute_on_remote_endpoint(task_function, [endpoint | rest], options) do
+    timeout = options[:timeout] || 30_000
+    node = endpoint_to_node(endpoint)
+
+    case :rpc.call(node, :erlang, :apply, [task_function, []], timeout) do
+      {:badrpc, _reason} ->
+        execute_on_remote_endpoint(task_function, rest, options)
+
+      result ->
+        {:ok, result}
+    end
+  end
+
+  defp endpoint_to_node(endpoint) when is_atom(endpoint), do: endpoint
+
+  defp endpoint_to_node(endpoint) when is_binary(endpoint) do
+    String.to_atom(endpoint)
+  end
+
+  defp endpoint_to_node(%{node: node}), do: endpoint_to_node(node)
+  defp endpoint_to_node(%{host: host}), do: String.to_atom(host)
+
+  defp http_get(url, headers) do
+    if Code.ensure_loaded?(Req) do
+      case Req.get(url, headers: headers) do
+        {:ok, %{status: status, body: body}} -> {:ok, %{status_code: status, body: body}}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      Logger.warning("Req not available, skipping HTTP GET to #{url}")
+      {:error, :http_client_not_available}
+    end
   end
 end

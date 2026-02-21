@@ -8,6 +8,7 @@ defmodule FLAME.Security.PolicyEngine do
 
   use GenServer
   require Logger
+  import Bitwise
 
   alias FLAME.Security.AuditLogger
   alias FLAME.AlertManager
@@ -241,6 +242,9 @@ defmodule FLAME.Security.PolicyEngine do
 
           case Map.get(state.evaluation_cache, cache_key) do
             nil ->
+              # Record cache miss
+              record_cache_metric(:miss)
+
               # Evaluate policy
               result = evaluate_policy_impl(policy, context)
 
@@ -257,8 +261,13 @@ defmodule FLAME.Security.PolicyEngine do
             {cached_result, cached_at} ->
               # Check if cache is still valid (5 minutes)
               if DateTime.diff(DateTime.utc_now(), cached_at, :second) < 300 do
+                # Record cache hit
+                record_cache_metric(:hit)
                 {:reply, {:ok, cached_result}, state}
               else
+                # Expired entry counts as a miss
+                record_cache_metric(:miss)
+
                 # Re-evaluate and update cache
                 result = evaluate_policy_impl(policy, context)
                 cache_entry = {result, DateTime.utc_now()}
@@ -687,8 +696,19 @@ defmodule FLAME.Security.PolicyEngine do
   end
 
   defp record_policy_evaluation(policy, result, _state) do
-    # Update metrics (simplified implementation)
     Logger.debug("Policy #{policy.id} evaluated with decision: #{result.decision}")
+  end
+
+  defp record_cache_metric(type) do
+    metrics = Process.get(:policy_engine_metrics) || %{cache_hits: 0, cache_misses: 0}
+
+    updated =
+      case type do
+        :hit -> Map.update(metrics, :cache_hits, 1, &(&1 + 1))
+        :miss -> Map.update(metrics, :cache_misses, 1, &(&1 + 1))
+      end
+
+    Process.put(:policy_engine_metrics, updated)
   end
 
   defp calculate_policy_metrics(timeframe, state) do
@@ -706,11 +726,16 @@ defmodule FLAME.Security.PolicyEngine do
     policies |> Map.values() |> Enum.count(& &1.enabled)
   end
 
-  defp calculate_cache_hit_rate(cache) do
-    # Simplified cache hit rate calculation
-    cache_size = map_size(cache)
-    # Mock percentage
-    if cache_size > 0, do: 85.0, else: 0.0
+  defp calculate_cache_hit_rate(_cache) do
+    hits = Map.get(Process.get(:policy_engine_metrics) || %{}, :cache_hits, 0)
+    misses = Map.get(Process.get(:policy_engine_metrics) || %{}, :cache_misses, 0)
+    total = hits + misses
+
+    if total > 0 do
+      Float.round(hits / total * 100.0, 1)
+    else
+      0.0
+    end
   end
 
   # Utility functions
@@ -721,23 +746,139 @@ defmodule FLAME.Security.PolicyEngine do
   end
 
   defp ip_in_cidr?(ip_string, cidr) when is_binary(ip_string) and is_binary(cidr) do
-    # Simplified IP CIDR check - in production use a proper IP library
-    # Mock implementation
-    true
+    with [network_str, prefix_str] <- String.split(cidr, "/", parts: 2),
+         {prefix_len, ""} <- Integer.parse(prefix_str),
+         {:ok, ip_addr} <- :inet.parse_address(String.to_charlist(ip_string)),
+         {:ok, network_addr} <- :inet.parse_address(String.to_charlist(network_str)) do
+      ip_in_cidr_match?(ip_addr, network_addr, prefix_len)
+    else
+      _ ->
+        Logger.debug("Failed to parse IP #{inspect(ip_string)} or CIDR #{inspect(cidr)}")
+        false
+    end
   end
 
-  defp evaluate_custom_condition(function_name, _args, _context) do
-    # Allow for custom condition evaluation
-    # This would typically call registered custom functions
-    Logger.debug("Evaluating custom condition: #{function_name}")
-    # Default to false for unknown functions
-    false
+  defp ip_in_cidr?(_ip, _cidr), do: false
+
+  defp ip_in_cidr_match?(ip_tuple, network_tuple, prefix_len)
+       when tuple_size(ip_tuple) == 4 and tuple_size(network_tuple) == 4 do
+    # IPv4: convert to 32-bit integers and compare masked values
+    ip_int = ip_tuple_to_integer(ip_tuple)
+    net_int = ip_tuple_to_integer(network_tuple)
+    mask = if prefix_len == 0, do: 0, else: ~~~((1 <<< (32 - prefix_len)) - 1) &&& 0xFFFFFFFF
+    (ip_int &&& mask) == (net_int &&& mask)
   end
 
-  defp apply_rate_limit(_context, limit, window) do
-    # Implement rate limiting logic
-    # This would typically update a rate limiting store
-    Logger.debug("Applying rate limit: #{limit} per #{window}")
+  defp ip_in_cidr_match?(ip_tuple, network_tuple, prefix_len)
+       when tuple_size(ip_tuple) == 8 and tuple_size(network_tuple) == 8 do
+    # IPv6: convert to 128-bit integers and compare masked values
+    ip_int = ipv6_tuple_to_integer(ip_tuple)
+    net_int = ipv6_tuple_to_integer(network_tuple)
+
+    mask =
+      if prefix_len == 0, do: 0, else: ~~~((1 <<< (128 - prefix_len)) - 1) &&& (1 <<< 128) - 1
+
+    (ip_int &&& mask) == (net_int &&& mask)
+  end
+
+  defp ip_in_cidr_match?(_, _, _), do: false
+
+  defp ip_tuple_to_integer({a, b, c, d}) do
+    Bitwise.bsl(a, 24) ||| Bitwise.bsl(b, 16) ||| Bitwise.bsl(c, 8) ||| d
+  end
+
+  defp ipv6_tuple_to_integer({a, b, c, d, e, f, g, h}) do
+    Bitwise.bsl(a, 112) ||| Bitwise.bsl(b, 96) ||| Bitwise.bsl(c, 80) ||| Bitwise.bsl(d, 64) |||
+      Bitwise.bsl(e, 48) ||| Bitwise.bsl(f, 32) ||| Bitwise.bsl(g, 16) ||| h
+  end
+
+  defp evaluate_custom_condition(function_name, args, context) do
+    custom_conditions =
+      Application.get_env(:flame_apple_container_backend, :custom_policy_conditions, %{})
+
+    case Map.get(custom_conditions, function_name) do
+      nil ->
+        Logger.debug(
+          "No custom condition registered for #{function_name}. " <>
+            "Register via :custom_policy_conditions in app config."
+        )
+
+        false
+
+      fun when is_function(fun, 2) ->
+        try do
+          fun.(args, context)
+        rescue
+          e ->
+            Logger.error("Custom condition #{function_name} raised: #{inspect(e)}")
+            false
+        end
+
+      {module, function} when is_atom(module) and is_atom(function) ->
+        try do
+          apply(module, function, [args, context])
+        rescue
+          e ->
+            Logger.error("Custom condition #{module}.#{function} raised: #{inspect(e)}")
+            false
+        end
+
+      other ->
+        Logger.warning("Invalid custom condition entry for #{function_name}: #{inspect(other)}")
+        false
+    end
+  end
+
+  defp apply_rate_limit(context, limit, window) do
+    # Use a configurable rate limiter if available, otherwise use ETS-based counter
+    case Application.get_env(:flame_apple_container_backend, :rate_limiter) do
+      nil ->
+        apply_ets_rate_limit(context, limit, window)
+
+      module when is_atom(module) ->
+        module.check_rate(context, limit, window)
+    end
+  end
+
+  defp apply_ets_rate_limit(context, limit, window) do
+    table = ensure_rate_limit_table()
+    # Build a key from the context (user_id + resource, or IP, etc.)
+    key = rate_limit_key(context)
+    now = System.monotonic_time(:second)
+    window_start = now - window
+
+    # Clean up expired entries for this key, then count remaining
+    existing =
+      case :ets.lookup(table, key) do
+        [{^key, timestamps}] -> Enum.filter(timestamps, &(&1 > window_start))
+        [] -> []
+      end
+
+    if length(existing) >= limit do
+      Logger.debug(
+        "Rate limit exceeded for #{inspect(key)}: #{length(existing)}/#{limit} in #{window}s"
+      )
+
+      {:error, :rate_limited}
+    else
+      :ets.insert(table, {key, [now | existing]})
+      :ok
+    end
+  end
+
+  defp ensure_rate_limit_table do
+    table = :flame_policy_rate_limits
+
+    case :ets.whereis(table) do
+      :undefined -> :ets.new(table, [:named_table, :public, :set])
+      _ref -> table
+    end
+  end
+
+  defp rate_limit_key(context) do
+    user_id = get_in(context, [:user, :id]) || "anonymous"
+    resource = get_in(context, [:resource, :type]) || "global"
+    {user_id, resource}
   end
 
   defp load_default_policies(state) do

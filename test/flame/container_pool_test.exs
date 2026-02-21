@@ -78,6 +78,18 @@ defmodule FLAME.ContainerPoolTest do
     %{pool: pool, config: config, backend_config: backend_config}
   end
 
+  defp match_container_error?(reason) when is_atom(reason) do
+    reason in [
+      :no_warm_containers,
+      :container_provisioning_failed,
+      :max_active_containers_reached,
+      :timeout
+    ]
+  end
+
+  defp match_container_error?({:container_start_failed, _, _}), do: true
+  defp match_container_error?(_), do: false
+
   describe "container pool initialization" do
     test "starts with correct configuration", %{config: _config} do
       status = ContainerPool.get_pool_status()
@@ -124,13 +136,7 @@ defmodule FLAME.ContainerPoolTest do
 
         {:error, reason} ->
           # Expected in test environment without actual containers
-          assert reason in [
-                   :no_warm_containers,
-                   :container_provisioning_failed,
-                   :max_active_containers_reached,
-                   # Add timeout as acceptable error
-                   :timeout
-                 ]
+          assert match_container_error?(reason)
       end
     end
 

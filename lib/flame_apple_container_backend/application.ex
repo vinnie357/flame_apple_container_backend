@@ -1,32 +1,21 @@
 defmodule FlameAppleContainerBackend.Application do
-  # See https://hexdocs.pm/elixir/Application.html
-  # for more information on OTP Applications
   @moduledoc false
 
   use Application
 
   @impl true
   def start(_type, _args) do
-    # Get configuration
     config = get_application_config()
 
     children =
       [
-        # FLAME Pool (primary functionality)
         maybe_start_flame_pool(config),
-
-        # Core FLAME systems (always available)
         maybe_start_core_system(FLAME.CircuitBreakerSupervisor, [], config),
         maybe_start_core_system(FLAME.ContainerMetrics, [], config),
         maybe_start_core_system(FLAME.ContainerHealth, [], config),
         maybe_start_core_system(FLAME.SecurityManager, [], config),
         maybe_start_core_system(FLAME.ResourceManager, [], config),
-        # Temporarily disable custom container pool and orchestrator
-        # maybe_start_core_system(FLAME.ContainerPool, [], config),
-        # maybe_start_core_system(FLAME.Orchestrator, [], config),
         maybe_start_core_system(FLAME.FunctionOptimizer, [], config),
-
-        # Optional systems based on configuration
         maybe_start_benchmarks(config),
         maybe_start_web_interface(config),
         maybe_start_worker_server(config)
@@ -40,32 +29,21 @@ defmodule FlameAppleContainerBackend.Application do
 
   defp get_application_config do
     %{
-      # Environment (test, development, production)
       environment: get_env_config(:environment, :production),
-
-      # Core system toggles
       enable_metrics: get_env_config(:enable_metrics, true),
       enable_security: get_env_config(:enable_security, true),
       enable_resource_management: get_env_config(:enable_resource_management, true),
       enable_orchestration: get_env_config(:enable_orchestration, true),
       enable_optimization: get_env_config(:enable_optimization, true),
-
-      # Optional system toggles
       enable_benchmarks: get_env_config(:enable_benchmarks, false),
       enable_web_interface: get_env_config(:enable_web_interface, false),
       enable_worker_server: get_env_config(:enable_worker_server, false),
-
-      # Web configuration
-      web_port: get_env_config(:web_port, 4001),
       worker_port: System.get_env("FLAME_WORKER_PORT"),
-
-      # Mode configuration
       minimal_mode: get_env_config(:minimal_mode, false)
     }
   end
 
   defp get_env_config(key, default) do
-    # Check environment variables first, then application config
     env_var = "FLAME_#{String.upcase(to_string(key))}"
 
     case System.get_env(env_var) do
@@ -110,16 +88,6 @@ defmodule FlameAppleContainerBackend.Application do
 
   defp maybe_start_web_interface(config) do
     if config.enable_web_interface and phoenix_available?() do
-      # Update endpoint config with the runtime port
-      Application.put_env(:flame_apple_container_backend, FlameWeb.Endpoint,
-        http: [ip: {127, 0, 0, 1}, port: config.web_port],
-        secret_key_base: "6eKv6BRu8iTQ8LkiXwNqIEJQn6JkW7FuJ2HpNktIVJ2LxSkqHqR4B1Jg8n5HdN0J",
-        live_view: [signing_salt: "VGhUQ1pH"],
-        pubsub_server: FlameWeb.PubSub,
-        render_errors: [accepts: ~w(html json), layout: false],
-        check_origin: false
-      )
-
       [
         {Phoenix.PubSub, name: FlameWeb.PubSub},
         {FlameWeb.Endpoint, []}
@@ -149,25 +117,24 @@ defmodule FlameAppleContainerBackend.Application do
 
   defp maybe_start_flame_pool(config) do
     if config.enable_web_interface or not config.minimal_mode do
-      # Use Apple Containers backend exclusively
+      pool_config = Application.get_env(:flame_apple_container_backend, :flame_pool, %{})
+      backend_config = Application.get_env(:flame_apple_container_backend, :flame_backend, %{})
+
       {
         FLAME.Pool,
-        # Increased timeout for container startup
         name: FlameAppleContainerBackend.Pool,
-        min: 0,
-        max: 5,
-        boot_timeout: 60_000,
-        idle_shutdown_after: 30_000,
-        max_concurrency: 10,
+        min: Map.get(pool_config, :min, 0),
+        max: Map.get(pool_config, :max, 5),
+        boot_timeout: Map.get(pool_config, :boot_timeout, 60_000),
+        idle_shutdown_after: Map.get(pool_config, :idle_shutdown_after, 30_000),
+        max_concurrency: Map.get(pool_config, :max_concurrency, 10),
         backend:
           {FLAME.AppleContainersBackend,
            [
-             image: "flame-worker:test3",
-             mode: :development,
-             erlang_cookie: "test_cookie_123",
-             # Will auto-fallback to test.local if not available
-             dns_domain: "flame.local",
-             container_prefix: "flame-worker"
+             image: Map.get(backend_config, :image, "flame-worker:latest"),
+             erlang_cookie: Map.get(backend_config, :erlang_cookie, "change_me"),
+             dns_domain: Map.get(backend_config, :dns_domain, "flame.local"),
+             container_prefix: Map.get(backend_config, :container_prefix, "flame-worker")
            ]}
       }
     else

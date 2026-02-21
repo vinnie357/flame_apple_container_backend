@@ -674,9 +674,7 @@ defmodule FLAME.AppleContainersBackend do
     Logger.info("Cleaning up container #{container_name}")
 
     # First try to stop gracefully
-    case System.cmd("container", ["stop", container_name, "--time", "10"],
-           stderr_to_stdout: true
-         ) do
+    case System.cmd("container", ["stop", container_name, "--time", "10"], stderr_to_stdout: true) do
       {_output, 0} ->
         Logger.info("Container #{container_name} stopped gracefully")
         :ok

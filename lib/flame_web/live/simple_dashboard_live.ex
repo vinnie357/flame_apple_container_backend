@@ -335,18 +335,23 @@ defmodule FlameWeb.SimpleDashboardLive do
 
   defp get_available_worker_images do
     # Get available images from container image ls - view only, no building
-    case System.cmd("container", ["image", "ls", "--format", "table {{.Repository}}:{{.Tag}}\t{{.Digest}}"], stderr_to_stdout: true) do
+    case System.cmd(
+           "container",
+           ["image", "ls", "--format", "table {{.Repository}}:{{.Tag}}\t{{.Digest}}"],
+           stderr_to_stdout: true
+         ) do
       {output, 0} ->
         output
         |> String.split("\n")
-        |> Enum.drop(1) # Skip header
+        # Skip header
+        |> Enum.drop(1)
         |> Enum.reject(&(&1 == ""))
         |> Enum.map(&parse_image_line/1)
         |> Enum.reject(&is_nil/1)
-        |> Enum.filter(fn image -> 
+        |> Enum.filter(fn image ->
           String.contains?(image.name, "worker") or
-          String.contains?(image.name, "flame") or
-          String.contains?(image.name, "claude")
+            String.contains?(image.name, "flame") or
+            String.contains?(image.name, "claude")
         end)
 
       {_error_output, _exit_code} ->
@@ -364,16 +369,20 @@ defmodule FlameWeb.SimpleDashboardLive do
               tag: tag,
               digest: String.trim(digest)
             }
+
           [name] ->
             %{
               name: name,
               tag: "latest",
               digest: String.trim(digest)
             }
-          _ -> nil
+
+          _ ->
+            nil
         end
-      _ -> nil
+
+      _ ->
+        nil
     end
   end
-
 end

@@ -976,12 +976,12 @@ defmodule FlameWeb.DashboardLive do
     # Parse container list line format: CONTAINER_ID IMAGE COMMAND CREATED STATUS PORTS NAMES
     # Example: "1a2b3c4d5e6f flame-worker:latest /entry.sh 2 hours ago Up 2 hours 0.0.0.0:4369->4369/tcp flame-worker-123"
     parts = String.split(line, ~r/\s+/)
-    
+
     if length(parts) >= 7 do
       _container_id = Enum.at(parts, 0)
       name = List.last(parts)
       status_part = parts |> Enum.slice(4..-2//-1) |> Enum.join(" ")
-      
+
       # Get container stats
       {memory_mb, memory_percent, cpu_percent} = get_container_stats(name)
 
@@ -1013,6 +1013,7 @@ defmodule FlameWeb.DashboardLive do
     case Regex.run(~r/Up\s+(\d+)\s+(seconds?|minutes?|hours?|days?)/, status_part) do
       [_, value_str, unit] ->
         value = String.to_integer(value_str)
+
         case unit do
           unit when unit in ["second", "seconds"] -> value * 1000
           unit when unit in ["minute", "minutes"] -> value * 60 * 1000
@@ -1020,6 +1021,7 @@ defmodule FlameWeb.DashboardLive do
           unit when unit in ["day", "days"] -> value * 24 * 60 * 60 * 1000
           _ -> :rand.uniform(3_600_000)
         end
+
       _ ->
         :rand.uniform(3_600_000)
     end
@@ -1070,7 +1072,6 @@ defmodule FlameWeb.DashboardLive do
         :rand.uniform(50) + 10
     end
   end
-
 
   defp check_container_health(container_name) do
     case System.cmd("container", ["exec", container_name, "elixir", "--version"]) do
@@ -1234,14 +1235,14 @@ defmodule FlameWeb.DashboardLive do
   defp parse_container_event_from_line(line) do
     # Parse container list line format: CONTAINER_ID IMAGE COMMAND CREATED STATUS PORTS NAMES
     parts = String.split(line, ~r/\s+/)
-    
+
     if length(parts) >= 7 do
       name = List.last(parts)
       status_part = parts |> Enum.slice(4..-2//-1) |> Enum.join(" ")
       created_part = Enum.at(parts, 3)
-      
+
       state = if String.contains?(status_part, "Up"), do: "running", else: "stopped"
-      
+
       %{
         timestamp: parse_container_timestamp_from_created(created_part),
         type: if(state == "running", do: :success, else: :info),
@@ -1258,19 +1259,22 @@ defmodule FlameWeb.DashboardLive do
     case Regex.run(~r/(\d+)\s+(seconds?|minutes?|hours?|days?)\s+ago/, created_part) do
       [_, value_str, unit] ->
         value = String.to_integer(value_str)
-        offset_ms = case unit do
-          unit when unit in ["second", "seconds"] -> value * 1000
-          unit when unit in ["minute", "minutes"] -> value * 60 * 1000
-          unit when unit in ["hour", "hours"] -> value * 60 * 60 * 1000
-          unit when unit in ["day", "days"] -> value * 24 * 60 * 60 * 1000
-          _ -> :rand.uniform(3_600_000)
-        end
+
+        offset_ms =
+          case unit do
+            unit when unit in ["second", "seconds"] -> value * 1000
+            unit when unit in ["minute", "minutes"] -> value * 60 * 1000
+            unit when unit in ["hour", "hours"] -> value * 60 * 60 * 1000
+            unit when unit in ["day", "days"] -> value * 24 * 60 * 60 * 1000
+            _ -> :rand.uniform(3_600_000)
+          end
+
         System.system_time(:millisecond) - offset_ms
+
       _ ->
         System.system_time(:millisecond) - :rand.uniform(3_600_000)
     end
   end
-
 
   defp calculate_percentage(current, max) when max > 0 do
     current / max * 100
@@ -1357,15 +1361,15 @@ defmodule FlameWeb.DashboardLive do
   defp terminate_oldest_container do
     case System.cmd("container", ["list"]) do
       {output, 0} ->
-        containers = 
-          output 
-          |> String.trim() 
-          |> String.split("\n") 
+        containers =
+          output
+          |> String.trim()
+          |> String.split("\n")
           # Skip header
           |> Enum.drop(1)
           |> Enum.reject(&(&1 == ""))
           |> Enum.filter(fn line -> String.contains?(line, "flame-worker") end)
-          |> Enum.map(fn line -> 
+          |> Enum.map(fn line ->
             # Extract container name from the line (last column)
             line |> String.split(~r/\s+/) |> List.last()
           end)

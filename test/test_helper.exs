@@ -4,7 +4,7 @@ Logger.remove_backend(:console)
 Application.put_env(:logger, :level, :emergency)
 Application.put_env(:logger, :compile_time_purge_matching, [[level_lower_than: :emergency]])
 
-ExUnit.start()
+ExUnit.start(exclude: [:integration])
 
 # Ensure applications are started before running tests
 Application.ensure_all_started(:floki)

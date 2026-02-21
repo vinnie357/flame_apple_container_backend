@@ -595,7 +595,7 @@ defmodule FLAME.Security.ComplianceManager do
     min(100, check_score + evidence_score)
   end
 
-  # Control check implementations (simplified for demo)
+  # Control check implementations
   # RBAC module exists - check if RBAC module is properly configured
   defp check_rbac_implementation do
     case Code.ensure_loaded(FLAME.Security.RBAC) do
@@ -604,37 +604,126 @@ defmodule FLAME.Security.ComplianceManager do
     end
   end
 
-  # Would check review schedules - simulate random status
-  defp check_access_reviews, do: :rand.uniform(10) > 7
+  # Check if access reviews are current via application config
+  defp check_access_reviews do
+    Application.get_env(:flame_apple_container_backend, :access_reviews_current, false)
+  end
 
-  # Would check auth policies - simulate mostly working but not always
-  defp check_strong_authentication, do: :rand.uniform(10) > 2
-  # Would check session handling
-  defp check_session_management, do: true
-  # Would check authorization calls
-  defp check_rbac_enforcement, do: true
-  # Would analyze role permissions
-  defp check_least_privilege, do: true
-  # AuditLogger module exists
-  defp check_audit_logging, do: true
-  # Would check log signing/encryption
-  defp check_log_integrity, do: true
-  # Would check retention policies
-  defp check_retention_compliance, do: true
-  # Would check monitoring systems
-  defp check_real_time_monitoring, do: true
-  # Would check alert rules
-  defp check_alerting_configuration, do: true
-  # Would check data encryption
-  defp check_encryption_at_rest, do: false
-  # Would check TLS/SSL
-  defp check_encryption_in_transit, do: true
-  # Would check data labeling
-  defp check_data_classification, do: false
-  # Would check documented procedures
-  defp check_incident_response_plan, do: true
-  # Would check notification configs
-  defp check_notification_procedures, do: true
+  # Check if strong authentication is enabled via application config
+  defp check_strong_authentication do
+    Application.get_env(:flame_apple_container_backend, :strong_authentication_enabled, false)
+  end
+
+  # Check session management via application config
+  defp check_session_management do
+    Application.get_env(:flame_apple_container_backend, :session_management_enabled, true)
+  end
+
+  # Check RBAC enforcement - verify the module is loaded and configured
+  defp check_rbac_enforcement do
+    case Code.ensure_loaded(FLAME.Security.RBAC) do
+      {:module, _} -> true
+      {:error, _} -> false
+    end
+  end
+
+  # Check least privilege via application config
+  defp check_least_privilege do
+    Application.get_env(:flame_apple_container_backend, :least_privilege_enforced, true)
+  end
+
+  # Check audit logging - verify AuditLogger module is available
+  defp check_audit_logging do
+    case Code.ensure_loaded(FLAME.Security.AuditLogger) do
+      {:module, _} -> true
+      {:error, _} -> false
+    end
+  end
+
+  # Check log integrity via application config (needs external verification)
+  defp check_log_integrity do
+    configured =
+      Application.get_env(:flame_apple_container_backend, :log_integrity_verified, false)
+
+    unless configured do
+      Logger.debug(
+        "Log integrity check needs configuration - set :log_integrity_verified in app config"
+      )
+    end
+
+    configured
+  end
+
+  # Check retention compliance via application config
+  defp check_retention_compliance do
+    Application.get_env(:flame_apple_container_backend, :retention_compliance_verified, false)
+  end
+
+  # Check real-time monitoring via application config
+  defp check_real_time_monitoring do
+    Application.get_env(:flame_apple_container_backend, :real_time_monitoring_enabled, true)
+  end
+
+  # Check alerting configuration via application config
+  defp check_alerting_configuration do
+    Application.get_env(:flame_apple_container_backend, :alerting_configured, true)
+  end
+
+  # Check encryption at rest (needs external verification)
+  defp check_encryption_at_rest do
+    configured =
+      Application.get_env(:flame_apple_container_backend, :encryption_at_rest_enabled, false)
+
+    unless configured do
+      Logger.debug(
+        "Encryption at rest check needs configuration - set :encryption_at_rest_enabled in app config"
+      )
+    end
+
+    configured
+  end
+
+  # Check encryption in transit (needs external verification)
+  defp check_encryption_in_transit do
+    configured =
+      Application.get_env(:flame_apple_container_backend, :encryption_in_transit_enabled, false)
+
+    unless configured do
+      Logger.debug(
+        "Encryption in transit check needs configuration - set :encryption_in_transit_enabled in app config"
+      )
+    end
+
+    configured
+  end
+
+  # Check data classification (needs external verification)
+  defp check_data_classification do
+    configured =
+      Application.get_env(:flame_apple_container_backend, :data_classification_enabled, false)
+
+    unless configured do
+      Logger.debug(
+        "Data classification check needs configuration - set :data_classification_enabled in app config"
+      )
+    end
+
+    configured
+  end
+
+  # Check incident response plan via application config
+  defp check_incident_response_plan do
+    Application.get_env(:flame_apple_container_backend, :incident_response_plan_exists, false)
+  end
+
+  # Check notification procedures via application config
+  defp check_notification_procedures do
+    Application.get_env(
+      :flame_apple_container_backend,
+      :notification_procedures_configured,
+      false
+    )
+  end
 
   defp update_compliance_status(state, assessment_results) do
     updated_status = Map.merge(state.compliance_status, assessment_results)

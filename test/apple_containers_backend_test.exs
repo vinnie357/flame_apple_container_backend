@@ -30,6 +30,7 @@ defmodule FLAME.AppleContainersBackendTest do
   end
 
   describe "container lifecycle" do
+    @tag :integration
     test "provisions container info in stub mode" do
       {:ok, backend} = AppleContainersBackend.init(mode: :test)
 

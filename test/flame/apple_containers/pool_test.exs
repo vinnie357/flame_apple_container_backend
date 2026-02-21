@@ -432,7 +432,7 @@ defmodule FLAME.AppleContainers.PoolTest do
         )
 
       :timer.sleep(300)
-      
+
       on_exit(fn ->
         if Process.alive?(pool) do
           Pool.shutdown(pool)
@@ -444,7 +444,7 @@ defmodule FLAME.AppleContainers.PoolTest do
           end
         end
       end)
-      
+
       %{pool: pool}
     end
 

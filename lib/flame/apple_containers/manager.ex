@@ -456,6 +456,7 @@ defmodule FLAME.AppleContainers.Manager do
     case Pool.wait_for_initialization(state.pool, timeout) do
       :ok ->
         {:reply, :ok, state}
+
       error ->
         {:reply, error, state}
     end
@@ -466,6 +467,7 @@ defmodule FLAME.AppleContainers.Manager do
     case Pool.wait_for_scaling_complete(state.pool, timeout) do
       :ok ->
         {:reply, :ok, state}
+
       error ->
         {:reply, error, state}
     end
@@ -532,6 +534,7 @@ defmodule FLAME.AppleContainers.Manager do
         case check_shutdown_completion(state) do
           {:shutdown_complete, state} ->
             {:stop, :normal, state}
+
           state ->
             {:noreply, state}
         end
@@ -581,6 +584,7 @@ defmodule FLAME.AppleContainers.Manager do
         case check_shutdown_completion(state) do
           {:shutdown_complete, state} ->
             {:stop, :normal, state}
+
           state ->
             {:noreply, state}
         end
@@ -602,7 +606,8 @@ defmodule FLAME.AppleContainers.Manager do
   def handle_info({:timeout, timeout_ref, :shutdown_timeout}, state) do
     if state.shutdown_timeout_ref == timeout_ref do
       Logger.warning("Shutdown timeout reached, proceeding with forced shutdown")
-      perform_shutdown(state, 1000)  # Give pool only 1 second to shutdown
+      # Give pool only 1 second to shutdown
+      perform_shutdown(state, 1000)
       GenServer.reply(state.shutdown_from, :ok)
       {:stop, :normal, state}
     else
@@ -687,7 +692,7 @@ defmodule FLAME.AppleContainers.Manager do
   defp execute_single_task(task_function, opts, state) do
     # Use a reasonable timeout for container acquisition (50% of total timeout)
     container_timeout = max(5000, div(opts.timeout, 2))
-    
+
     case Pool.acquire_container(state.pool, container_timeout) do
       {:ok, container} ->
         try do
@@ -730,7 +735,7 @@ defmodule FLAME.AppleContainers.Manager do
         {:error, reason} -> {:error, reason}
       end
     rescue
-      e -> 
+      e ->
         # Kill the task if it's still running
         Task.shutdown(task, :brutal_kill)
         {:error, {:task_await_exception, e}}
@@ -739,7 +744,7 @@ defmodule FLAME.AppleContainers.Manager do
         # Kill the task if it's still running
         Task.shutdown(task, :brutal_kill)
         {:error, :task_timeout}
-      
+
       :exit, reason ->
         # Kill the task if it's still running
         Task.shutdown(task, :brutal_kill)
@@ -874,16 +879,16 @@ defmodule FLAME.AppleContainers.Manager do
   defp check_shutdown_completion(state) do
     if state.shutdown_from && map_size(state.running_tasks) == 0 do
       Logger.info("All tasks completed, proceeding with shutdown")
-      
+
       # Cancel the timeout timer if it's still active
       if state.shutdown_timeout_ref do
         :erlang.cancel_timer(state.shutdown_timeout_ref)
       end
-      
+
       # Reply first, then schedule shutdown
       GenServer.reply(state.shutdown_from, :ok)
       send(self(), :perform_shutdown)
-      
+
       # Return a special marker to indicate shutdown should complete
       {:shutdown_complete, state}
     else
