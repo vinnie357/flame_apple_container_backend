@@ -1,10 +1,43 @@
-/_build
-/cover
-/deps
-/doc
+# Build artifacts
+/_build/
+/deps/
+/cover/
+/doc/
 /.fetch
-erl_crash.dump
 *.ez
 *.beam
+erl_crash.dump
+
+# Generated files and package builds (built via "mix hex.build")
+*.tar.gz
+flame_apple_container_backend-*.tar
+flame_apple_container_backend-*/
+
+# Config secrets
 /config/*.secret.exs
+.env
+.env.*
+!.env.example
+
+# Elixir Language Server
 .elixir_ls/
+
+# Editor/IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+/tmp/
+
+# Log files
+*.log
+
+# Beads task management
+.beads.sqlite

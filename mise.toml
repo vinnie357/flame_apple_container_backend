@@ -1,0 +1,47 @@
+[env]
+_.file = ".env"
+
+[tools]
+erlang = "27"
+elixir = "1.18"
+
+[tasks.deps]
+description = "Install dependencies"
+run = "mix deps.get"
+
+[tasks.compile]
+description = "Compile the project"
+run = "mix compile"
+depends = ["deps"]
+
+[tasks.test]
+description = "Run tests"
+run = "mix test"
+depends = ["deps"]
+
+[tasks.format]
+description = "Format code"
+run = "mix format"
+
+[tasks.format-check]
+description = "Check formatting"
+run = "mix format --check-formatted"
+
+[tasks.lint]
+description = "Run credo linter"
+run = "mix credo --strict"
+depends = ["compile"]
+
+[tasks.docs]
+description = "Generate documentation"
+run = "mix docs"
+depends = ["compile"]
+
+[tasks.hex-build]
+description = "Build Hex package"
+run = "mix hex.build"
+depends = ["compile"]
+
+[tasks.ci]
+description = "Run full CI pipeline"
+depends = ["compile", "format-check", "test", "lint"]
