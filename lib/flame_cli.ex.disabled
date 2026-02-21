@@ -1,0 +1,996 @@
+defmodule FlameCLI do
+  @moduledoc """
+  Command-line interface for Apple Containers FLAME backend.
+  
+  Provides comprehensive CLI tools for:
+  - Cluster management and monitoring
+  - Job submission and workflow orchestration
+  - Container image lifecycle management
+  - Alert management and troubleshooting
+  - Performance monitoring and analytics
+  - Development and debugging utilities
+  """
+  
+  require Logger
+  
+  @api_base_url "http://localhost:4000/api/v1"
+  @version "1.0.0"
+  
+  def main(args) do
+    args
+    |> parse_args()
+    |> process_command()
+  end
+  
+  defp parse_args(args) do
+    {options, command_args, _} = OptionParser.parse(args,
+      switches: [
+        help: :boolean,
+        version: :boolean,
+        format: :string,
+        output: :string,
+        verbose: :boolean,
+        config: :string,
+        cluster: :string,
+        timeout: :integer
+      ],
+      aliases: [
+        h: :help,
+        v: :version,
+        f: :format,
+        o: :output,
+        c: :config
+      ]
+    )
+    
+    {options, command_args}
+  end
+  
+  defp process_command({options, []}) do
+    if options[:help] or options == [] do
+      print_help()
+    elsif options[:version] do
+      print_version()
+    else
+      print_help()
+    end
+  end
+  
+  defp process_command({options, command_args}) when is_list(command_args) do
+    if options[:version] do
+      print_version()
+    else
+      dispatch_command({options, command_args})
+    end
+  end
+  
+  defp dispatch_command({options, ["cluster" | args]}) do
+    handle_cluster_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["job" | args]}) do
+    handle_job_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["workflow" | args]}) do
+    handle_workflow_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["image" | args]}) do
+    handle_image_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["alert" | args]}) do
+    handle_alert_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["metrics" | args]}) do
+    handle_metrics_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["config" | args]}) do
+    handle_config_command(options, args)
+  end
+  
+  defp dispatch_command({options, ["dev" | args]}) do
+    handle_dev_command(options, args)
+  end
+  
+  defp dispatch_command({_options, [unknown_command | _]}) do
+    IO.puts("Unknown command: #{unknown_command}")
+    IO.puts("Use --help to see available commands.")
+  end
+  
+  
+  # Cluster Commands
+  
+  defp handle_cluster_command(options, ["list"]) do
+    case api_request("GET", "/clusters", nil, options) do
+      {:ok, %{"clusters" => clusters}} ->
+        format_and_print_clusters(clusters, options)
+      
+      {:error, reason} ->
+        print_error("Failed to list clusters: #{reason}")
+    end
+  end
+  
+  defp handle_cluster_command(options, ["get", cluster_id]) do
+    case api_request("GET", "/clusters/#{cluster_id}", nil, options) do
+      {:ok, cluster} ->
+        format_and_print_cluster_details(cluster, options)
+      
+      {:error, reason} ->
+        print_error("Failed to get cluster #{cluster_id}: #{reason}")
+    end
+  end
+  
+  defp handle_cluster_command(options, ["register", cluster_id, endpoints_json]) do
+    case Jason.decode(endpoints_json) do
+      {:ok, endpoints} ->
+        cluster_config = %{
+          "id" => cluster_id,
+          "endpoints" => endpoints
+        }
+        
+        case api_request("POST", "/clusters", cluster_config, options) do
+          {:ok, %{"cluster" => cluster}} ->
+            print_success("Cluster #{cluster_id} registered successfully")
+            format_and_print_cluster_details(cluster, options)
+          
+          {:error, reason} ->
+            print_error("Failed to register cluster #{cluster_id}: #{reason}")
+        end
+      
+      {:error, _} ->
+        print_error("Invalid JSON format for endpoints")
+    end
+  end
+  
+  defp handle_cluster_command(options, ["unregister", cluster_id]) do
+    case api_request("DELETE", "/clusters/#{cluster_id}", nil, options) do
+      {:ok, _} ->
+        print_success("Cluster #{cluster_id} unregistered successfully")
+      
+      {:error, reason} ->
+        print_error("Failed to unregister cluster #{cluster_id}: #{reason}")
+    end
+  end
+  
+  defp handle_cluster_command(options, ["failover", from_cluster, to_cluster]) do
+    failover_config = %{
+      "target_cluster_id" => to_cluster
+    }
+    
+    case api_request("POST", "/clusters/#{from_cluster}/failover", failover_config, options) do
+      {:ok, _} ->
+        print_success("Failover initiated from #{from_cluster} to #{to_cluster}")
+      
+      {:error, reason} ->
+        print_error("Failover failed: #{reason}")
+    end
+  end
+  
+  defp handle_cluster_command(_options, ["status"]) do
+    case api_request("GET", "/metrics/overview", nil, []) do
+      {:ok, %{"clusters" => cluster_metrics}} ->
+        print_cluster_status(cluster_metrics)
+      
+      {:error, reason} ->
+        print_error("Failed to get cluster status: #{reason}")
+    end
+  end
+  
+  defp handle_cluster_command(_options, args) do
+    print_error("Unknown cluster command: #{Enum.join(args, " ")}")
+    print_cluster_help()
+  end
+  
+  # Job Commands
+  
+  defp handle_job_command(options, ["list"]) do
+    params = build_job_list_params(options)
+    
+    case api_request("GET", "/jobs?#{params}", nil, options) do
+      {:ok, %{"jobs" => jobs}} ->
+        format_and_print_jobs(jobs, options)
+      
+      {:error, reason} ->
+        print_error("Failed to list jobs: #{reason}")
+    end
+  end
+  
+  defp handle_job_command(options, ["get", job_id]) do
+    case api_request("GET", "/jobs/#{job_id}", nil, options) do
+      {:ok, job} ->
+        format_and_print_job_details(job, options)
+      
+      {:error, reason} ->
+        print_error("Failed to get job #{job_id}: #{reason}")
+    end
+  end
+  
+  defp handle_job_command(options, ["submit", job_spec_file]) do
+    case File.read(job_spec_file) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, job_spec} ->
+            case api_request("POST", "/jobs", job_spec, options) do
+              {:ok, %{"job_id" => job_id}} ->
+                print_success("Job submitted successfully: #{job_id}")
+              
+              {:error, reason} ->
+                print_error("Failed to submit job: #{reason}")
+            end
+          
+          {:error, _} ->
+            print_error("Invalid JSON in job specification file")
+        end
+      
+      {:error, reason} ->
+        print_error("Failed to read job specification file: #{reason}")
+    end
+  end
+  
+  defp handle_job_command(options, ["cancel", job_id]) do
+    cancel_data = %{"reason" => "cancelled_via_cli"}
+    
+    case api_request("DELETE", "/jobs/#{job_id}", cancel_data, options) do
+      {:ok, _} ->
+        print_success("Job #{job_id} cancelled successfully")
+      
+      {:error, reason} ->
+        print_error("Failed to cancel job #{job_id}: #{reason}")
+    end
+  end
+  
+  defp handle_job_command(options, ["logs", job_id]) do
+    # This would fetch job logs - placeholder for now
+    print_info("Job logs for #{job_id}:")
+    print_info("(Log streaming not yet implemented)")
+  end
+  
+  defp handle_job_command(options, ["watch"]) do
+    print_info("Watching job status (press Ctrl+C to stop)...")
+    watch_jobs(options)
+  end
+  
+  defp handle_job_command(_options, args) do
+    print_error("Unknown job command: #{Enum.join(args, " ")}")
+    print_job_help()
+  end
+  
+  # Workflow Commands
+  
+  defp handle_workflow_command(options, ["list"]) do
+    case api_request("GET", "/workflows", nil, options) do
+      {:ok, %{"workflows" => workflows}} ->
+        format_and_print_workflows(workflows, options)
+      
+      {:error, reason} ->
+        print_error("Failed to list workflows: #{reason}")
+    end
+  end
+  
+  defp handle_workflow_command(options, ["submit", workflow_spec_file]) do
+    case File.read(workflow_spec_file) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, workflow_spec} ->
+            case api_request("POST", "/workflows", workflow_spec, options) do
+              {:ok, %{"workflow_id" => workflow_id}} ->
+                print_success("Workflow submitted successfully: #{workflow_id}")
+              
+              {:error, reason} ->
+                print_error("Failed to submit workflow: #{reason}")
+            end
+          
+          {:error, _} ->
+            print_error("Invalid JSON in workflow specification file")
+        end
+      
+      {:error, reason} ->
+        print_error("Failed to read workflow specification file: #{reason}")
+    end
+  end
+  
+  defp handle_workflow_command(_options, args) do
+    print_error("Unknown workflow command: #{Enum.join(args, " ")}")
+    print_workflow_help()
+  end
+  
+  # Image Commands
+  
+  defp handle_image_command(options, ["list"]) do
+    case api_request("GET", "/images", nil, options) do
+      {:ok, %{"images" => images}} ->
+        format_and_print_images(images, options)
+      
+      {:error, reason} ->
+        print_error("Failed to list images: #{reason}")
+    end
+  end
+  
+  defp handle_image_command(options, ["build", build_spec_file]) do
+    case File.read(build_spec_file) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, build_spec} ->
+            case api_request("POST", "/images/build", build_spec, options) do
+              {:ok, %{"build_id" => build_id}} ->
+                print_success("Image build started: #{build_id}")
+                
+                if options[:verbose] do
+                  watch_image_build(build_id, options)
+                end
+              
+              {:error, reason} ->
+                print_error("Failed to start image build: #{reason}")
+            end
+          
+          {:error, _} ->
+            print_error("Invalid JSON in build specification file")
+        end
+      
+      {:error, reason} ->
+        print_error("Failed to read build specification file: #{reason}")
+    end
+  end
+  
+  defp handle_image_command(options, ["deploy", image_id]) do
+    case api_request("POST", "/images/#{image_id}/deploy", %{}, options) do
+      {:ok, %{"deployment_id" => deployment_id}} ->
+        print_success("Image deployment started: #{deployment_id}")
+      
+      {:error, reason} ->
+        print_error("Failed to deploy image #{image_id}: #{reason}")
+    end
+  end
+  
+  defp handle_image_command(options, ["scan", image_id]) do
+    case api_request("POST", "/images/#{image_id}/scan", %{}, options) do
+      {:ok, _} ->
+        print_success("Security scan started for image #{image_id}")
+      
+      {:error, reason} ->
+        print_error("Failed to start security scan for image #{image_id}: #{reason}")
+    end
+  end
+  
+  defp handle_image_command(_options, args) do
+    print_error("Unknown image command: #{Enum.join(args, " ")}")
+    print_image_help()
+  end
+  
+  # Alert Commands
+  
+  defp handle_alert_command(options, ["list"]) do
+    case api_request("GET", "/alerts", nil, options) do
+      {:ok, %{"alerts" => alerts}} ->
+        format_and_print_alerts(alerts, options)
+      
+      {:error, reason} ->
+        print_error("Failed to list alerts: #{reason}")
+    end
+  end
+  
+  defp handle_alert_command(options, ["ack", alert_id]) do
+    ack_data = %{"user_id" => "cli_user", "notes" => "Acknowledged via CLI"}
+    
+    case api_request("POST", "/alerts/#{alert_id}/acknowledge", ack_data, options) do
+      {:ok, _} ->
+        print_success("Alert #{alert_id} acknowledged")
+      
+      {:error, reason} ->
+        print_error("Failed to acknowledge alert #{alert_id}: #{reason}")
+    end
+  end
+  
+  defp handle_alert_command(options, ["resolve", alert_id]) do
+    resolve_data = %{"user_id" => "cli_user", "resolution_notes" => "Resolved via CLI"}
+    
+    case api_request("POST", "/alerts/#{alert_id}/resolve", resolve_data, options) do
+      {:ok, _} ->
+        print_success("Alert #{alert_id} resolved")
+      
+      {:error, reason} ->
+        print_error("Failed to resolve alert #{alert_id}: #{reason}")
+    end
+  end
+  
+  defp handle_alert_command(_options, args) do
+    print_error("Unknown alert command: #{Enum.join(args, " ")}")
+    print_alert_help()
+  end
+  
+  # Metrics Commands
+  
+  defp handle_metrics_command(options, ["overview"]) do
+    case api_request("GET", "/metrics/overview", nil, options) do
+      {:ok, metrics} ->
+        format_and_print_metrics_overview(metrics, options)
+      
+      {:error, reason} ->
+        print_error("Failed to get metrics overview: #{reason}")
+    end
+  end
+  
+  defp handle_metrics_command(options, ["performance"]) do
+    case api_request("GET", "/metrics/performance", nil, options) do
+      {:ok, metrics} ->
+        format_and_print_performance_metrics(metrics, options)
+      
+      {:error, reason} ->
+        print_error("Failed to get performance metrics: #{reason}")
+    end
+  end
+  
+  defp handle_metrics_command(_options, args) do
+    print_error("Unknown metrics command: #{Enum.join(args, " ")}")
+    print_metrics_help()
+  end
+  
+  # Config Commands
+  
+  defp handle_config_command(options, ["init"]) do
+    config_file = get_config_file_path(options)
+    
+    default_config = %{
+      "api_url" => @api_base_url,
+      "timeout" => 30,
+      "format" => "table",
+      "clusters" => %{},
+      "profiles" => %{
+        "default" => %{
+          "cluster" => nil,
+          "format" => "table"
+        }
+      }
+    }
+    
+    case File.write(config_file, Jason.encode!(default_config, pretty: true)) do
+      :ok ->
+        print_success("Configuration file created at #{config_file}")
+      
+      {:error, reason} ->
+        print_error("Failed to create configuration file: #{reason}")
+    end
+  end
+  
+  defp handle_config_command(options, ["show"]) do
+    config_file = get_config_file_path(options)
+    
+    case File.read(config_file) do
+      {:ok, content} ->
+        IO.puts(content)
+      
+      {:error, :enoent} ->
+        print_error("Configuration file not found. Run 'flame config init' to create one.")
+      
+      {:error, reason} ->
+        print_error("Failed to read configuration file: #{reason}")
+    end
+  end
+  
+  defp handle_config_command(_options, args) do
+    print_error("Unknown config command: #{Enum.join(args, " ")}")
+    print_config_help()
+  end
+  
+  # Development Commands
+  
+  defp handle_dev_command(options, ["test-connection"]) do
+    case api_request("GET", "/health", nil, options) do
+      {:ok, health_status} ->
+        print_success("Connection successful")
+        
+        if options[:verbose] do
+          format_and_print_health_status(health_status, options)
+        end
+      
+      {:error, reason} ->
+        print_error("Connection failed: #{reason}")
+    end
+  end
+  
+  defp handle_dev_command(options, ["generate-job", job_name]) do
+    job_spec = %{
+      "name" => job_name,
+      "function" => %{
+        "module" => "MyApp.Jobs",
+        "function" => "example_job",
+        "args" => []
+      },
+      "parameters" => %{
+        "input" => "example_data"
+      },
+      "requirements" => %{
+        "memory_mb" => 512,
+        "cpu_cores" => 0.5,
+        "timeout_ms" => 300000
+      },
+      "priority" => "normal",
+      "metadata" => %{
+        "created_by" => "cli_generator"
+      }
+    }
+    
+    filename = "#{job_name}_job_spec.json"
+    
+    case File.write(filename, Jason.encode!(job_spec, pretty: true)) do
+      :ok ->
+        print_success("Job specification generated: #{filename}")
+      
+      {:error, reason} ->
+        print_error("Failed to generate job specification: #{reason}")
+    end
+  end
+  
+  defp handle_dev_command(options, ["generate-workflow", workflow_name]) do
+    workflow_spec = %{
+      "name" => workflow_name,
+      "description" => "Example workflow generated by CLI",
+      "steps" => [
+        %{
+          "id" => "step1",
+          "name" => "Initial Processing",
+          "job_spec" => %{
+            "name" => "#{workflow_name}_step1",
+            "function" => %{
+              "module" => "MyApp.Workflows",
+              "function" => "process_step",
+              "args" => []
+            },
+            "parameters" => %{"step" => 1}
+          },
+          "depends_on" => []
+        },
+        %{
+          "id" => "step2",
+          "name" => "Final Processing",
+          "job_spec" => %{
+            "name" => "#{workflow_name}_step2",
+            "function" => %{
+              "module" => "MyApp.Workflows",
+              "function" => "process_step",
+              "args" => []
+            },
+            "parameters" => %{"step" => 2}
+          },
+          "depends_on" => ["step1"]
+        }
+      ],
+      "metadata" => %{
+        "created_by" => "cli_generator"
+      }
+    }
+    
+    filename = "#{workflow_name}_workflow_spec.json"
+    
+    case File.write(filename, Jason.encode!(workflow_spec, pretty: true)) do
+      :ok ->
+        print_success("Workflow specification generated: #{filename}")
+      
+      {:error, reason} ->
+        print_error("Failed to generate workflow specification: #{reason}")
+    end
+  end
+  
+  defp handle_dev_command(_options, args) do
+    print_error("Unknown dev command: #{Enum.join(args, " ")}")
+    print_dev_help()
+  end
+  
+  # API Request Helper
+  
+  defp api_request(method, path, body, options) do
+    url = get_api_url(options) <> path
+    timeout = get_timeout(options)
+    
+    headers = [
+      {"Content-Type", "application/json"},
+      {"Accept", "application/json"},
+      {"User-Agent", "FlameCLI/#{@version}"}
+    ]
+    
+    request_body = if body, do: Jason.encode!(body), else: ""
+    
+    case HTTPoison.request(String.to_atom(String.downcase(method)), url, request_body, headers, [timeout: timeout, recv_timeout: timeout]) do
+      {:ok, %HTTPoison.Response{status_code: status_code, body: response_body}} when status_code in 200..299 ->
+        case Jason.decode(response_body) do
+          {:ok, data} -> {:ok, data}
+          {:error, _} -> {:ok, %{"message" => "Success"}}
+        end
+      
+      {:ok, %HTTPoison.Response{status_code: status_code, body: response_body}} ->
+        case Jason.decode(response_body) do
+          {:ok, %{"error" => error}} -> {:error, error}
+          {:ok, %{"message" => message}} -> {:error, message}
+          _ -> {:error, "HTTP #{status_code}"}
+        end
+      
+      {:error, %HTTPoison.Error{reason: reason}} ->
+        {:error, "Connection error: #{reason}"}
+    end
+  rescue
+    error ->
+      {:error, "Request failed: #{inspect(error)}"}
+  end
+  
+  # Formatting and Display Functions
+  
+  defp format_and_print_clusters(clusters, options) do
+    case get_format(options) do
+      "json" ->
+        IO.puts(Jason.encode!(clusters, pretty: true))
+      
+      "yaml" ->
+        # Would use a YAML library if available
+        print_error("YAML format not yet supported")
+      
+      _ ->
+        print_clusters_table(clusters)
+    end
+  end
+  
+  defp print_clusters_table(clusters) do
+    IO.puts("\n" <> IO.ANSI.bright() <> "CLUSTERS" <> IO.ANSI.reset())
+    IO.puts(String.duplicate("=", 80))
+    
+    # Header
+    IO.puts(format_table_row([
+      "ID", "STATUS", "REGION", "CONTAINERS", "MEMORY", "CPU", "HEALTH"
+    ], [15, 10, 10, 10, 12, 8, 10]))
+    
+    IO.puts(String.duplicate("-", 80))
+    
+    # Rows
+    Enum.each(clusters, fn cluster ->
+      resources = cluster["resources"] || %{}
+      health = cluster["health"] || %{}
+      
+      memory_usage = "#{resources["available_memory_gb"] || 0}GB"
+      cpu_usage = "#{resources["available_cpu_cores"] || 0} cores"
+      container_count = "#{resources["active_containers"] || 0}/#{resources["max_containers"] || 0}"
+      
+      status_color = case cluster["status"] do
+        "healthy" -> IO.ANSI.green()
+        "unhealthy" -> IO.ANSI.red()
+        _ -> IO.ANSI.yellow()
+      end
+      
+      IO.puts(format_table_row([
+        cluster["id"],
+        status_color <> String.upcase(cluster["status"] || "unknown") <> IO.ANSI.reset(),
+        cluster["region"] || "N/A",
+        container_count,
+        memory_usage,
+        cpu_usage,
+        String.upcase(health["status"] || "unknown")
+      ], [15, 10, 10, 10, 12, 8, 10]))
+    end)
+    
+    IO.puts("\nTotal clusters: #{length(clusters)}")
+  end
+  
+  defp format_and_print_jobs(jobs, options) do
+    case get_format(options) do
+      "json" ->
+        IO.puts(Jason.encode!(jobs, pretty: true))
+      
+      _ ->
+        print_jobs_table(jobs)
+    end
+  end
+  
+  defp print_jobs_table(jobs) do
+    IO.puts("\n" <> IO.ANSI.bright() <> "JOBS" <> IO.ANSI.reset())
+    IO.puts(String.duplicate("=", 100))
+    
+    # Header
+    IO.puts(format_table_row([
+      "ID", "NAME", "STATE", "PRIORITY", "PROGRESS", "DURATION", "CREATED"
+    ], [20, 25, 10, 10, 10, 10, 15]))
+    
+    IO.puts(String.duplicate("-", 100))
+    
+    # Rows
+    Enum.each(jobs, fn job ->
+      state_color = case job["state"] do
+        "completed" -> IO.ANSI.green()
+        "running" -> IO.ANSI.blue()
+        "failed" -> IO.ANSI.red()
+        "cancelled" -> IO.ANSI.yellow()
+        _ -> IO.ANSI.white()
+      end
+      
+      duration = format_duration(job["duration_ms"])
+      created = format_datetime(job["created_at"])
+      progress = "#{job["progress"] || 0}%"
+      
+      IO.puts(format_table_row([
+        job["id"],
+        job["name"],
+        state_color <> String.upcase(job["state"] || "unknown") <> IO.ANSI.reset(),
+        String.upcase(job["priority"] || "normal"),
+        progress,
+        duration,
+        created
+      ], [20, 25, 10, 10, 10, 10, 15]))
+    end)
+    
+    IO.puts("\nTotal jobs: #{length(jobs)}")
+  end
+  
+  defp format_and_print_alerts(alerts, options) do
+    case get_format(options) do
+      "json" ->
+        IO.puts(Jason.encode!(alerts, pretty: true))
+      
+      _ ->
+        print_alerts_table(alerts)
+    end
+  end
+  
+  defp print_alerts_table(alerts) do
+    IO.puts("\n" <> IO.ANSI.bright() <> "ALERTS" <> IO.ANSI.reset())
+    IO.puts(String.duplicate("=", 90))
+    
+    # Header
+    IO.puts(format_table_row([
+      "ID", "NAME", "SEVERITY", "STATUS", "TRIGGERED", "DURATION"
+    ], [20, 30, 10, 12, 15, 10]))
+    
+    IO.puts(String.duplicate("-", 90))
+    
+    # Rows
+    Enum.each(alerts, fn alert ->
+      severity_color = case alert["severity"] do
+        "critical" -> IO.ANSI.red()
+        "high" -> IO.ANSI.yellow()
+        "medium" -> IO.ANSI.blue()
+        _ -> IO.ANSI.white()
+      end
+      
+      triggered = format_datetime(alert["triggered_at"])
+      duration = format_duration(alert["duration_ms"])
+      
+      IO.puts(format_table_row([
+        alert["id"],
+        alert["name"],
+        severity_color <> String.upcase(alert["severity"] || "unknown") <> IO.ANSI.reset(),
+        String.upcase(alert["status"] || "unknown"),
+        triggered,
+        duration
+      ], [20, 30, 10, 12, 15, 10]))
+    end)
+    
+    IO.puts("\nTotal alerts: #{length(alerts)}")
+  end
+  
+  # Utility Functions
+  
+  defp format_table_row(columns, widths) do
+    columns
+    |> Enum.zip(widths)
+    |> Enum.map(fn {col, width} -> String.pad_trailing(to_string(col), width) end)
+    |> Enum.join(" ")
+  end
+  
+  defp format_duration(nil), do: "N/A"
+  defp format_duration(ms) when is_integer(ms) do
+    cond do
+      ms < 1000 -> "#{ms}ms"
+      ms < 60_000 -> "#{div(ms, 1000)}s"
+      ms < 3_600_000 -> "#{div(ms, 60_000)}m"
+      true -> "#{div(ms, 3_600_000)}h"
+    end
+  end
+  defp format_duration(_), do: "N/A"
+  
+  defp format_datetime(nil), do: "N/A"
+  defp format_datetime(iso_string) when is_binary(iso_string) do
+    case DateTime.from_iso8601(iso_string) do
+      {:ok, datetime, _} ->
+        datetime
+        |> DateTime.to_naive()
+        |> NaiveDateTime.to_string()
+        |> String.slice(0, 16)  # YYYY-MM-DD HH:MM
+      
+      _ -> iso_string
+    end
+  end
+  defp format_datetime(_), do: "N/A"
+  
+  defp get_api_url(options) do
+    options[:config] && get_config_value("api_url", options) || @api_base_url
+  end
+  
+  defp get_timeout(options) do
+    (options[:timeout] || get_config_value("timeout", options) || 30) * 1000
+  end
+  
+  defp get_format(options) do
+    options[:format] || get_config_value("format", options) || "table"
+  end
+  
+  defp get_config_file_path(options) do
+    options[:config] || Path.join(System.user_home(), ".flame_config.json")
+  end
+  
+  defp get_config_value(key, options) do
+    config_file = get_config_file_path(options)
+    
+    case File.read(config_file) do
+      {:ok, content} ->
+        case Jason.decode(content) do
+          {:ok, config} -> Map.get(config, key)
+          _ -> nil
+        end
+      
+      _ -> nil
+    end
+  end
+  
+  defp watch_jobs(options) do
+    # This would implement real-time job watching
+    print_info("Job watching not yet implemented")
+  end
+  
+  defp watch_image_build(build_id, options) do
+    # This would implement real-time build watching
+    print_info("Build watching not yet implemented")
+  end
+  
+  defp build_job_list_params(options) do
+    []
+    |> add_param("state", options[:state])
+    |> add_param("priority", options[:priority])
+    |> add_param("limit", options[:limit])
+    |> Enum.join("&")
+  end
+  
+  defp add_param(params, _key, nil), do: params
+  defp add_param(params, key, value), do: ["#{key}=#{value}" | params]
+  
+  # Print Functions
+  
+  defp print_success(message) do
+    IO.puts(IO.ANSI.green() <> "✓ " <> message <> IO.ANSI.reset())
+  end
+  
+  defp print_error(message) do
+    IO.puts(:stderr, IO.ANSI.red() <> "✗ " <> message <> IO.ANSI.reset())
+    System.halt(1)
+  end
+  
+  defp print_info(message) do
+    IO.puts(IO.ANSI.blue() <> "ℹ " <> message <> IO.ANSI.reset())
+  end
+  
+  defp print_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}FLAME CLI v#{@version}#{IO.ANSI.reset()}
+    Command-line interface for Apple Containers FLAME backend
+    
+    #{IO.ANSI.bright()}USAGE:#{IO.ANSI.reset()}
+        flame [OPTIONS] <COMMAND> [ARGS]
+    
+    #{IO.ANSI.bright()}OPTIONS:#{IO.ANSI.reset()}
+        -h, --help              Show this help message
+        -v, --version           Show version information
+        -f, --format FORMAT     Output format (table, json, yaml)
+        -o, --output FILE       Output to file instead of stdout
+        -c, --config FILE       Use custom configuration file
+        --verbose               Verbose output
+        --timeout SECONDS       Request timeout (default: 30)
+    
+    #{IO.ANSI.bright()}COMMANDS:#{IO.ANSI.reset()}
+        cluster                 Cluster management
+        job                     Job management
+        workflow                Workflow orchestration
+        image                   Container image management
+        alert                   Alert management
+        metrics                 Performance metrics
+        config                  Configuration management
+        dev                     Development utilities
+    
+    #{IO.ANSI.bright()}EXAMPLES:#{IO.ANSI.reset()}
+        flame cluster list
+        flame job submit my_job.json
+        flame image build my_build.json
+        flame alert list --format json
+    
+    Run 'flame <COMMAND> --help' for more information on a command.
+    """)
+  end
+  
+  defp print_version do
+    IO.puts("FLAME CLI v#{@version}")
+  end
+  
+  defp print_cluster_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}CLUSTER COMMANDS:#{IO.ANSI.reset()}
+        list                    List all registered clusters
+        get <CLUSTER_ID>        Get detailed cluster information
+        register <ID> <JSON>    Register a new cluster
+        unregister <ID>         Unregister a cluster
+        failover <FROM> <TO>    Trigger cluster failover
+        status                  Show cluster status overview
+    """)
+  end
+  
+  defp print_job_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}JOB COMMANDS:#{IO.ANSI.reset()}
+        list                    List jobs
+        get <JOB_ID>            Get detailed job information
+        submit <FILE>           Submit job from specification file
+        cancel <JOB_ID>         Cancel a running job
+        logs <JOB_ID>           View job execution logs
+        watch                   Watch job status in real-time
+    """)
+  end
+  
+  defp print_workflow_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}WORKFLOW COMMANDS:#{IO.ANSI.reset()}
+        list                    List workflows
+        submit <FILE>           Submit workflow from specification file
+    """)
+  end
+  
+  defp print_image_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}IMAGE COMMANDS:#{IO.ANSI.reset()}
+        list                    List container images
+        build <FILE>            Build image from specification file
+        deploy <IMAGE_ID>       Deploy an image
+        scan <IMAGE_ID>         Run security scan on image
+    """)
+  end
+  
+  defp print_alert_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}ALERT COMMANDS:#{IO.ANSI.reset()}
+        list                    List active alerts
+        ack <ALERT_ID>          Acknowledge an alert
+        resolve <ALERT_ID>      Resolve an alert
+    """)
+  end
+  
+  defp print_metrics_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}METRICS COMMANDS:#{IO.ANSI.reset()}
+        overview                Show metrics overview
+        performance             Show performance metrics
+    """)
+  end
+  
+  defp print_config_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}CONFIG COMMANDS:#{IO.ANSI.reset()}
+        init                    Initialize configuration file
+        show                    Show current configuration
+    """)
+  end
+  
+  defp print_dev_help do
+    IO.puts("""
+    #{IO.ANSI.bright()}DEV COMMANDS:#{IO.ANSI.reset()}
+        test-connection         Test API connection
+        generate-job <NAME>     Generate example job specification
+        generate-workflow <NAME> Generate example workflow specification
+    """)
+  end
+  
+  # Placeholder implementations for detailed formatting
+  defp format_and_print_cluster_details(cluster, _options), do: IO.inspect(cluster, pretty: true)
+  defp format_and_print_job_details(job, _options), do: IO.inspect(job, pretty: true)
+  defp format_and_print_workflows(workflows, _options), do: IO.inspect(workflows, pretty: true)
+  defp format_and_print_images(images, _options), do: IO.inspect(images, pretty: true)
+  defp format_and_print_metrics_overview(metrics, _options), do: IO.inspect(metrics, pretty: true)
+  defp format_and_print_performance_metrics(metrics, _options), do: IO.inspect(metrics, pretty: true)
+  defp format_and_print_health_status(health, _options), do: IO.inspect(health, pretty: true)
+  defp print_cluster_status(metrics), do: IO.inspect(metrics, pretty: true)
+end
