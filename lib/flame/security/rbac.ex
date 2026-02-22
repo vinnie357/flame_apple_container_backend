@@ -135,20 +135,24 @@ defmodule FLAME.Security.RBAC do
     :roles,
     :policies,
     :sessions,
-    :contexts
+    :contexts,
+    :auth_adapter
   ]
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def init(_opts) do
+  def init(opts) do
+    auth_adapter = Keyword.get(opts, :auth_adapter)
+
     state = %__MODULE__{
       users: %{},
       roles: @roles,
       policies: %{},
       sessions: %{},
-      contexts: %{}
+      contexts: %{},
+      auth_adapter: auth_adapter
     }
 
     Logger.info("RBAC system initialized with #{map_size(@roles)} roles")
@@ -196,7 +200,7 @@ defmodule FLAME.Security.RBAC do
   # GenServer callbacks
 
   def handle_call({:authenticate, username, password, opts}, _from, state) do
-    case authenticate_user_impl(username, password, opts) do
+    case authenticate_user_impl(username, password, opts, state) do
       {:ok, user} ->
         user_id = user.id
         updated_state = put_in(state.users[user_id], user)
@@ -390,19 +394,31 @@ defmodule FLAME.Security.RBAC do
 
   # Private implementation
 
-  defp authenticate_user_impl(username, password, opts) do
-    case Application.get_env(:flame_apple_container_backend, :auth_adapter) do
-      nil ->
-        Logger.warning(
-          "No auth adapter configured. Set :auth_adapter in :flame_apple_container_backend app config " <>
-            "to a module implementing authenticate/3."
-        )
+  defp authenticate_user_impl(username, password, opts, state) do
+    adapter = resolve_auth_adapter(state)
+    invoke_auth_adapter(adapter, username, password, opts)
+  end
 
-        {:error, :auth_adapter_not_configured}
+  defp resolve_auth_adapter(state) do
+    state.auth_adapter ||
+      Application.get_env(:flame_apple_container_backend, :auth_adapter)
+  end
 
-      adapter when is_atom(adapter) ->
-        adapter.authenticate(username, password, opts)
-    end
+  defp invoke_auth_adapter(nil, _username, _password, _opts) do
+    Logger.warning(
+      "No auth adapter configured. Set :auth_adapter in :flame_apple_container_backend app config " <>
+        "or pass auth_adapter: option to start_link/1."
+    )
+
+    {:error, :auth_adapter_not_configured}
+  end
+
+  defp invoke_auth_adapter(adapter, username, password, opts) when is_function(adapter, 3) do
+    adapter.(username, password, opts)
+  end
+
+  defp invoke_auth_adapter(adapter, username, password, opts) when is_atom(adapter) do
+    adapter.authenticate(username, password, opts)
   end
 
   defp get_session(state, session_id) do

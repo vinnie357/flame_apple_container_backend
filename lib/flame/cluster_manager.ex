@@ -26,7 +26,8 @@ defmodule FLAME.ClusterManager do
     :load_balancer,
     :failover_policies,
     :metrics_aggregator,
-    :failover_callback
+    :failover_callback,
+    :http_client
   ]
 
   # 30 seconds
@@ -123,7 +124,8 @@ defmodule FLAME.ClusterManager do
       load_balancer: initialize_load_balancer(cluster_config.load_balancing_strategy),
       failover_policies: initialize_failover_policies(opts),
       metrics_aggregator: initialize_metrics_aggregator(),
-      failover_callback: Keyword.get(opts, :failover_callback)
+      failover_callback: Keyword.get(opts, :failover_callback),
+      http_client: Keyword.get(opts, :http_client, &http_get/2)
     }
 
     # Register local cluster
