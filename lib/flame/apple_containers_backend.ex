@@ -14,9 +14,9 @@ defmodule FLAME.AppleContainersBackend do
 
   require Logger
 
-  alias FLAME.ContainerPool
   alias FLAME.CircuitBreaker
   alias FLAME.ContainerMetrics
+  alias FLAME.ContainerPool
 
   defstruct [
     :config,
@@ -220,53 +220,62 @@ defmodule FLAME.AppleContainersBackend do
           |> Enum.map(&String.trim/1)
           |> Enum.reject(&(&1 == ""))
 
-        if requested_domain in available_domains do
-          Logger.info("Using DNS domain: #{requested_domain}")
-          requested_domain
-        else
-          Logger.warning(
-            "Requested DNS domain '#{requested_domain}' not available. Available domains: #{inspect(available_domains)}"
-          )
-
-          if "test.local" in available_domains do
-            Logger.info("Falling back to test.local")
-            "test.local"
-          else
-            case available_domains do
-              [first_domain | _] ->
-                Logger.info("Using first available domain: #{first_domain}")
-                first_domain
-
-              [] ->
-                Logger.error("No DNS domains available in Apple Containers system")
-                # Try to get the default domain
-                case System.cmd("container", ["system", "dns", "default", "get"]) do
-                  {default_domain, 0} when default_domain != "" ->
-                    trimmed_default = String.trim(default_domain)
-                    Logger.warning("Using default DNS domain: #{trimmed_default}")
-                    trimmed_default
-
-                  _ ->
-                    Logger.error(
-                      "No default DNS domain found. Container clustering will not work properly."
-                    )
-
-                    Logger.warning(
-                      "Please create a DNS domain using: container system dns create <domain>"
-                    )
-
-                    # Fallback to requested even if not available
-                    requested_domain
-                end
-            end
-          end
-        end
+        select_dns_domain(requested_domain, available_domains)
 
       {error, _} ->
         Logger.warning(
           "Failed to query Apple Containers DNS domains: #{error}. Using requested domain: #{requested_domain}"
         )
 
+        requested_domain
+    end
+  end
+
+  defp select_dns_domain(requested_domain, available_domains) do
+    if requested_domain in available_domains do
+      Logger.info("Using DNS domain: #{requested_domain}")
+      requested_domain
+    else
+      Logger.warning(
+        "Requested DNS domain '#{requested_domain}' not available. Available domains: #{inspect(available_domains)}"
+      )
+
+      select_fallback_domain(requested_domain, available_domains)
+    end
+  end
+
+  defp select_fallback_domain(requested_domain, available_domains) do
+    cond do
+      "test.local" in available_domains ->
+        Logger.info("Falling back to test.local")
+        "test.local"
+
+      available_domains != [] ->
+        first_domain = hd(available_domains)
+        Logger.info("Using first available domain: #{first_domain}")
+        first_domain
+
+      true ->
+        select_default_dns_domain(requested_domain)
+    end
+  end
+
+  defp select_default_dns_domain(requested_domain) do
+    Logger.error("No DNS domains available in Apple Containers system")
+
+    # Try to get the default domain
+    case System.cmd("container", ["system", "dns", "default", "get"]) do
+      {default_domain, 0} when default_domain != "" ->
+        trimmed_default = String.trim(default_domain)
+        Logger.warning("Using default DNS domain: #{trimmed_default}")
+        trimmed_default
+
+      _ ->
+        Logger.error("No default DNS domain found. Container clustering will not work properly.")
+
+        Logger.warning("Please create a DNS domain using: container system dns create <domain>")
+
+        # Fallback to requested even if not available
         requested_domain
     end
   end
@@ -397,6 +406,22 @@ defmodule FLAME.AppleContainersBackend do
 
   defp start_container(backend, container_name, node_name) do
     # First, check if container name is already in use
+    ensure_no_existing_container(container_name)
+
+    cmd = build_container_run_command(backend, container_name, node_name)
+
+    Logger.debug("Starting container with command: #{inspect(cmd)}")
+
+    case System.cmd(hd(cmd), tl(cmd), stderr_to_stdout: true) do
+      {output, 0} ->
+        handle_container_start_success(container_name, output)
+
+      {error, code} ->
+        handle_container_start_failure(backend, container_name, code, error)
+    end
+  end
+
+  defp ensure_no_existing_container(container_name) do
     case check_container_exists(container_name) do
       {:ok, :exists} ->
         Logger.warning("Container #{container_name} already exists, cleaning up first")
@@ -410,7 +435,9 @@ defmodule FLAME.AppleContainersBackend do
       {:error, reason} ->
         Logger.warning("Could not check container existence: #{inspect(reason)}")
     end
+  end
 
+  defp build_container_run_command(backend, container_name, node_name) do
     env_vars = [
       "--env",
       "NODE_NAME=#{node_name}",
@@ -439,65 +466,62 @@ defmodule FLAME.AppleContainersBackend do
         []
       end
 
-    cmd =
-      [
-        "container",
-        "run",
-        "--name",
-        container_name,
-        "--detach",
-        "--rm"
-      ] ++ env_vars ++ network_args ++ resource_limits ++ [backend.config.image]
+    [
+      "container",
+      "run",
+      "--name",
+      container_name,
+      "--detach",
+      "--rm"
+    ] ++ env_vars ++ network_args ++ resource_limits ++ [backend.config.image]
+  end
 
-    Logger.debug("Starting container with command: #{inspect(cmd)}")
+  defp handle_container_start_success(container_name, output) do
+    container_id = String.trim(output)
+    Logger.info("Started container #{container_name} with ID #{container_id}")
 
-    case System.cmd(hd(cmd), tl(cmd), stderr_to_stdout: true) do
-      {output, 0} ->
-        container_id = String.trim(output)
-        Logger.info("Started container #{container_name} with ID #{container_id}")
+    # Verify container is actually running
+    case verify_container_running(container_name) do
+      {:ok, :running} ->
+        {:ok, container_id}
 
-        # Verify container is actually running
-        case verify_container_running(container_name) do
-          {:ok, :running} ->
-            {:ok, container_id}
-
-          {:error, reason} ->
-            Logger.error("Container started but verification failed: #{inspect(reason)}")
-            cleanup_container(container_name)
-            {:error, {:container_verification_failed, reason}}
-        end
-
-      {error, code} ->
-        Logger.error("Failed to start container #{container_name} (exit code #{code}): #{error}")
-
-        # Provide more helpful error messages based on common issues
-        error_reason =
-          case {code, error} do
-            {1, error_msg} ->
-              if String.contains?(error_msg, "already exists") do
-                {:container_name_conflict, container_name}
-              else
-                {:container_start_failed, code, error}
-              end
-
-            {125, error_msg} ->
-              cond do
-                String.contains?(error_msg, "image not found") ->
-                  {:image_not_found, backend.config.image}
-
-                String.contains?(error_msg, "permission denied") ->
-                  {:permission_denied, "Check container system permissions"}
-
-                true ->
-                  {:container_start_failed, code, error}
-              end
-
-            _ ->
-              {:container_start_failed, code, error}
-          end
-
-        {:error, error_reason}
+      {:error, reason} ->
+        Logger.error("Container started but verification failed: #{inspect(reason)}")
+        cleanup_container(container_name)
+        {:error, {:container_verification_failed, reason}}
     end
+  end
+
+  defp handle_container_start_failure(backend, container_name, code, error) do
+    Logger.error("Failed to start container #{container_name} (exit code #{code}): #{error}")
+
+    error_reason = classify_start_error(backend, container_name, code, error)
+    {:error, error_reason}
+  end
+
+  defp classify_start_error(_backend, container_name, 1, error_msg) do
+    if String.contains?(error_msg, "already exists") do
+      {:container_name_conflict, container_name}
+    else
+      {:container_start_failed, 1, error_msg}
+    end
+  end
+
+  defp classify_start_error(backend, _container_name, 125, error_msg) do
+    cond do
+      String.contains?(error_msg, "image not found") ->
+        {:image_not_found, backend.config.image}
+
+      String.contains?(error_msg, "permission denied") ->
+        {:permission_denied, "Check container system permissions"}
+
+      true ->
+        {:container_start_failed, 125, error_msg}
+    end
+  end
+
+  defp classify_start_error(_backend, _container_name, code, error) do
+    {:container_start_failed, code, error}
   end
 
   defp check_container_exists(container_name) do
@@ -616,31 +640,10 @@ defmodule FLAME.AppleContainersBackend do
   defp connect_with_retry(node_atom, retries_left) when retries_left > 0 do
     case Node.connect(node_atom) do
       true ->
-        # Verify the connection is actually working
-        case rpc_call_test(node_atom) do
-          {:ok, _} ->
-            {:ok, node_atom}
-
-          {:error, reason} ->
-            Logger.warning("Connection established but RPC test failed: #{inspect(reason)}")
-
-            if retries_left > 1 do
-              Process.sleep(2000)
-              connect_with_retry(node_atom, retries_left - 1)
-            else
-              {:error, {:rpc_test_failed, reason}}
-            end
-        end
+        verify_connection_or_retry(node_atom, retries_left)
 
       false ->
-        Logger.debug("Connection attempt failed, #{retries_left - 1} retries remaining")
-
-        if retries_left > 1 do
-          Process.sleep(2000)
-          connect_with_retry(node_atom, retries_left - 1)
-        else
-          {:error, :connection_failed}
-        end
+        retry_or_fail_connection(node_atom, retries_left, :connection_failed)
 
       :ignored ->
         {:error, :connection_ignored}
@@ -651,23 +654,42 @@ defmodule FLAME.AppleContainersBackend do
     {:error, :max_retries_exceeded}
   end
 
-  defp rpc_call_test(node_atom) do
-    try do
-      # Simple RPC test to verify the connection works
-      case :rpc.call(node_atom, :erlang, :system_info, [:system_version], 5000) do
-        {:badrpc, reason} ->
-          {:error, {:rpc_failed, reason}}
+  defp verify_connection_or_retry(node_atom, retries_left) do
+    case rpc_call_test(node_atom) do
+      {:ok, _} ->
+        {:ok, node_atom}
 
-        result when is_list(result) ->
-          {:ok, result}
-
-        result ->
-          {:ok, result}
-      end
-    rescue
-      e ->
-        {:error, {:rpc_exception, e}}
+      {:error, reason} ->
+        Logger.warning("Connection established but RPC test failed: #{inspect(reason)}")
+        retry_or_fail_connection(node_atom, retries_left, {:rpc_test_failed, reason})
     end
+  end
+
+  defp retry_or_fail_connection(node_atom, retries_left, failure_reason) do
+    if retries_left > 1 do
+      Logger.debug("Retrying connection, #{retries_left - 1} retries remaining")
+      Process.sleep(2000)
+      connect_with_retry(node_atom, retries_left - 1)
+    else
+      {:error, failure_reason}
+    end
+  end
+
+  defp rpc_call_test(node_atom) do
+    # Simple RPC test to verify the connection works
+    case :rpc.call(node_atom, :erlang, :system_info, [:system_version], 5000) do
+      {:badrpc, reason} ->
+        {:error, {:rpc_failed, reason}}
+
+      result when is_list(result) ->
+        {:ok, result}
+
+      result ->
+        {:ok, result}
+    end
+  rescue
+    e ->
+      {:error, {:rpc_exception, e}}
   end
 
   defp cleanup_container(container_name) do
@@ -789,41 +811,39 @@ defmodule FLAME.AppleContainersBackend do
   end
 
   defp serialize_function_for_container(function) do
-    try do
-      # For simple functions, try to extract the source code
-      # This is a simplified approach - in production you'd want more sophisticated serialization
-      case Function.info(function) do
-        info when is_list(info) ->
-          # Create a simple wrapper script that can be executed in the container
-          script_content = """
-          # Execute function in Elixir container
-          elixir -e "
-          result = (#{inspect(function)}).()
-          IO.puts(inspect(result))
-          "
-          """
+    # For simple functions, try to extract the source code
+    # This is a simplified approach - in production you'd want more sophisticated serialization
+    case Function.info(function) do
+      info when is_list(info) ->
+        # Create a simple wrapper script that can be executed in the container
+        script_content = """
+        # Execute function in Elixir container
+        elixir -e "
+        result = (#{inspect(function)}).()
+        IO.puts(inspect(result))
+        "
+        """
 
-          {:ok, script_content}
+        {:ok, script_content}
 
-        _ ->
-          # Fallback: convert to string representation
-          function_string = inspect(function)
+      _ ->
+        # Fallback: convert to string representation
+        function_string = inspect(function)
 
-          script_content = """
-          # Execute function in Elixir container  
-          elixir -e "
-          func = #{function_string}
-          result = func.()
-          IO.puts(inspect(result))
-          "
-          """
+        script_content = """
+        # Execute function in Elixir container
+        elixir -e "
+        func = #{function_string}
+        result = func.()
+        IO.puts(inspect(result))
+        "
+        """
 
-          {:ok, script_content}
-      end
-    rescue
-      e ->
-        {:error, {:function_inspection_failed, e}}
+        {:ok, script_content}
     end
+  rescue
+    e ->
+      {:error, {:function_inspection_failed, e}}
   end
 
   defp execute_code_in_container(container_name, script_content) do

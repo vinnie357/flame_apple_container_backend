@@ -10,8 +10,8 @@ defmodule FLAME.Security.ComplianceManager do
   use GenServer
   require Logger
 
-  alias FLAME.Security.AuditLogger
   alias FLAME.AlertManager
+  alias FLAME.Security.AuditLogger
 
   # Supported compliance frameworks
   @frameworks %{
@@ -411,17 +411,17 @@ defmodule FLAME.Security.ComplianceManager do
     issues = []
 
     issues =
-      if not rbac_implemented do
-        [%{type: "missing_rbac", control: control.id, severity: "high"} | issues]
-      else
+      if rbac_implemented do
         issues
+      else
+        [%{type: "missing_rbac", control: control.id, severity: "high"} | issues]
       end
 
     issues =
-      if not access_reviews_current do
-        [%{type: "outdated_access_review", control: control.id, severity: "medium"} | issues]
-      else
+      if access_reviews_current do
         issues
+      else
+        [%{type: "outdated_access_review", control: control.id, severity: "medium"} | issues]
       end
 
     score = calculate_control_score([rbac_implemented, access_reviews_current], evidence)
@@ -445,10 +445,10 @@ defmodule FLAME.Security.ComplianceManager do
     issues = []
 
     issues =
-      if not strong_auth_enabled do
-        [%{type: "weak_authentication", control: control.id, severity: "high"} | issues]
-      else
+      if strong_auth_enabled do
         issues
+      else
+        [%{type: "weak_authentication", control: control.id, severity: "high"} | issues]
       end
 
     score = calculate_control_score([strong_auth_enabled, session_management], evidence)

@@ -314,22 +314,18 @@ defmodule FLAME.FunctionOptimizer do
   end
 
   defp get_module_functions(module) do
-    try do
-      module.__info__(:functions)
-    rescue
-      _ -> []
-    end
+    module.__info__(:functions)
+  rescue
+    _ -> []
   end
 
   defp get_module_docs(module) do
-    try do
-      case Code.fetch_docs(module) do
-        {:docs_v1, _, _, _, _, _, functions} -> length(functions)
-        _ -> 0
-      end
-    rescue
+    case Code.fetch_docs(module) do
+      {:docs_v1, _, _, _, _, _, functions} -> length(functions)
       _ -> 0
     end
+  rescue
+    _ -> 0
   end
 
   defp perform_function_optimization(function, _metadata, state) do
@@ -427,7 +423,7 @@ defmodule FLAME.FunctionOptimizer do
 
   defp apply_computation_caching(function, _function_info, state) do
     # Wrap function with memoization if it appears to be pure
-    if is_function_pure?(function) do
+    if function_pure?(function) do
       cached_function = create_memoized_function(function, state)
       {:ok, cached_function}
     else
@@ -447,7 +443,7 @@ defmodule FLAME.FunctionOptimizer do
     {:error, :not_implemented}
   end
 
-  defp is_function_pure?(_function) do
+  defp function_pure?(_function) do
     # Simplified purity check - in practice this would be more sophisticated
     # For now, assume functions are pure
     true
@@ -474,23 +470,21 @@ defmodule FLAME.FunctionOptimizer do
   end
 
   defp inject_dependencies_impl(function, dependencies, state) do
-    try do
-      # Create enhanced function with injected dependencies
-      enhanced_function = fn args ->
-        # Make dependencies available in function scope
-        dependency_context = prepare_dependency_context(dependencies, state)
+    # Create enhanced function with injected dependencies
+    enhanced_function = fn args ->
+      # Make dependencies available in function scope
+      dependency_context = prepare_dependency_context(dependencies, state)
 
-        # Execute function with dependency context
-        case apply_with_context(function, args, dependency_context) do
-          {:ok, result} -> result
-          {:error, reason} -> raise "Dependency injection failed: #{inspect(reason)}"
-        end
+      # Execute function with dependency context
+      case apply_with_context(function, args, dependency_context) do
+        {:ok, result} -> result
+        {:error, reason} -> raise "Dependency injection failed: #{inspect(reason)}"
       end
-
-      {:ok, enhanced_function}
-    rescue
-      error -> {:error, {:injection_failed, error}}
     end
+
+    {:ok, enhanced_function}
+  rescue
+    error -> {:error, {:injection_failed, error}}
   end
 
   defp prepare_dependency_context(dependencies, state) do
@@ -523,12 +517,10 @@ defmodule FLAME.FunctionOptimizer do
   end
 
   defp apply_with_context(function, args, _context) when is_function(function) do
-    try do
-      result = apply(function, args)
-      {:ok, result}
-    rescue
-      error -> {:error, error}
-    end
+    result = apply(function, args)
+    {:ok, result}
+  rescue
+    error -> {:error, error}
   end
 
   defp analyze_function_performance_impl(function, execution_data, state) do

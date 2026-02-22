@@ -439,59 +439,55 @@ defmodule FLAME.AppleContainers.Monitor do
   end
 
   defp check_pool_health(pool) do
-    try do
-      status = Pool.get_status(pool)
-      health = Pool.get_health(pool)
+    status = Pool.get_status(pool)
+    health = Pool.get_health(pool)
 
-      %{
-        status: :healthy,
-        details: %{
-          pool_status: status,
-          pool_health: health,
-          utilization: calculate_pool_utilization(status)
-        }
+    %{
+      status: :healthy,
+      details: %{
+        pool_status: status,
+        pool_health: health,
+        utilization: calculate_pool_utilization(status)
       }
-    rescue
-      e ->
-        %{
-          status: :unhealthy,
-          error: inspect(e),
-          details: %{}
-        }
-    end
+    }
+  rescue
+    e ->
+      %{
+        status: :unhealthy,
+        error: inspect(e),
+        details: %{}
+      }
   end
 
   defp check_container_health(pool) do
-    try do
-      pool_status = Pool.get_status(pool)
+    pool_status = Pool.get_status(pool)
 
-      total = pool_status.total
-      unhealthy = pool_status.unhealthy
+    total = pool_status.total
+    unhealthy = pool_status.unhealthy
 
-      health_status =
-        cond do
-          total == 0 -> :critical
-          unhealthy / total > 0.5 -> :unhealthy
-          unhealthy / total > 0.2 -> :degraded
-          true -> :healthy
-        end
+    health_status =
+      cond do
+        total == 0 -> :critical
+        unhealthy / total > 0.5 -> :unhealthy
+        unhealthy / total > 0.2 -> :degraded
+        true -> :healthy
+      end
 
-      %{
-        status: health_status,
-        details: %{
-          total_containers: total,
-          unhealthy_containers: unhealthy,
-          unhealthy_ratio: if(total > 0, do: unhealthy / total, else: 0)
-        }
+    %{
+      status: health_status,
+      details: %{
+        total_containers: total,
+        unhealthy_containers: unhealthy,
+        unhealthy_ratio: if(total > 0, do: unhealthy / total, else: 0)
       }
-    rescue
-      e ->
-        %{
-          status: :critical,
-          error: inspect(e),
-          details: %{}
-        }
-    end
+    }
+  rescue
+    e ->
+      %{
+        status: :critical,
+        error: inspect(e),
+        details: %{}
+      }
   end
 
   defp check_system_health do
@@ -522,7 +518,7 @@ defmodule FLAME.AppleContainers.Monitor do
     # Last 5 minutes
     recent_metrics = get_recent_metrics(metrics_store, 300_000)
 
-    if length(recent_metrics) == 0 do
+    if recent_metrics == [] do
       %{
         status: :unknown,
         details: %{reason: "No recent metrics available"}
@@ -533,7 +529,7 @@ defmodule FLAME.AppleContainers.Monitor do
 
       health_status =
         cond do
-          avg_response_time > 10000 or error_rate > 0.1 -> :unhealthy
+          avg_response_time > 10_000 or error_rate > 0.1 -> :unhealthy
           avg_response_time > 5000 or error_rate > 0.05 -> :degraded
           true -> :healthy
         end
@@ -735,20 +731,18 @@ defmodule FLAME.AppleContainers.Monitor do
   end
 
   defp collect_pool_metrics(pool, timestamp) do
-    try do
-      status = Pool.get_status(pool)
-      pool_metrics = Pool.get_metrics(pool)
+    status = Pool.get_status(pool)
+    pool_metrics = Pool.get_metrics(pool)
 
-      %{
-        timestamp: timestamp,
-        status: status,
-        metrics: pool_metrics
-      }
-    rescue
-      e ->
-        Logger.error("Failed to collect pool metrics: #{inspect(e)}")
-        %{timestamp: timestamp, error: inspect(e)}
-    end
+    %{
+      timestamp: timestamp,
+      status: status,
+      metrics: pool_metrics
+    }
+  rescue
+    e ->
+      Logger.error("Failed to collect pool metrics: #{inspect(e)}")
+      %{timestamp: timestamp, error: inspect(e)}
   end
 
   defp collect_system_resource_metrics(timestamp) do
@@ -816,7 +810,7 @@ defmodule FLAME.AppleContainers.Monitor do
 
   defp generate_system_summary(state) do
     # Last hour
-    recent_metrics = get_recent_metrics(state.metrics_store, 3600_000)
+    recent_metrics = get_recent_metrics(state.metrics_store, 3_600_000)
 
     %{
       capacity_utilization: calculate_capacity_utilization(recent_metrics),

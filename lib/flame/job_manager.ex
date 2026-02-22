@@ -15,7 +15,7 @@ defmodule FLAME.JobManager do
   use GenServer
   require Logger
 
-  alias FLAME.{ClusterManager, AlertManager, SecurityManager}
+  alias FLAME.{AlertManager, ClusterManager, SecurityManager}
 
   defstruct [
     :job_queues,
@@ -477,55 +477,10 @@ defmodule FLAME.JobManager do
         should_retry = should_retry_job(job, state.retry_policies)
 
         if should_retry do
-          # Schedule retry
-          retry_job = %{
-            job
-            | state: @state_retrying,
-              retry_count: job.retry_count + 1,
-              error_message: error_reason,
-              next_retry_at: calculate_next_retry(job, state.retry_policies)
-          }
-
-          state = update_job(retry_job, state)
-          schedule_job_retry(retry_job)
-
-          Logger.warning(
-            "Job failed, scheduling retry: #{job_id} (attempt #{retry_job.retry_count})"
-          )
-
+          state = schedule_job_for_retry(job, job_id, error_reason, state)
           {:noreply, state}
         else
-          # Job failed permanently
-          failed_job = %{
-            job
-            | state: @state_failed,
-              completed_at: System.system_time(:millisecond),
-              error_message: error_reason
-          }
-
-          state = update_job(failed_job, state)
-          state = move_job_to_history(failed_job, state)
-          state = add_to_dead_letter_queue(failed_job, state)
-
-          Logger.error("Job failed permanently: #{job_id} - #{error_reason}")
-
-          # Send alert for critical jobs
-          if job.priority <= @priority_high do
-            AlertManager.trigger_manual_alert(%{
-              name: "Critical Job Failed",
-              severity: 2,
-              description: "Critical job #{job.name} failed: #{error_reason}",
-              tags: ["job", "failure", "critical"]
-            })
-          end
-
-          # Send telemetry
-          :telemetry.execute([:flame, :job, :failed], %{}, %{
-            job_id: job_id,
-            error_reason: error_reason,
-            retry_count: job.retry_count
-          })
-
+          state = handle_permanent_job_failure(job, job_id, error_reason, state)
           {:noreply, state}
         end
     end
@@ -602,6 +557,60 @@ defmodule FLAME.JobManager do
 
   ## Private Functions
 
+  defp schedule_job_for_retry(job, job_id, error_reason, state) do
+    retry_job = %{
+      job
+      | state: @state_retrying,
+        retry_count: job.retry_count + 1,
+        error_message: error_reason,
+        next_retry_at: calculate_next_retry(job, state.retry_policies)
+    }
+
+    state = update_job(retry_job, state)
+    schedule_job_retry(retry_job)
+
+    Logger.warning("Job failed, scheduling retry: #{job_id} (attempt #{retry_job.retry_count})")
+
+    state
+  end
+
+  defp handle_permanent_job_failure(job, job_id, error_reason, state) do
+    failed_job = %{
+      job
+      | state: @state_failed,
+        completed_at: System.system_time(:millisecond),
+        error_message: error_reason
+    }
+
+    state = update_job(failed_job, state)
+    state = move_job_to_history(failed_job, state)
+    state = add_to_dead_letter_queue(failed_job, state)
+
+    Logger.error("Job failed permanently: #{job_id} - #{error_reason}")
+
+    maybe_alert_critical_job_failure(job, error_reason)
+
+    # Send telemetry
+    :telemetry.execute([:flame, :job, :failed], %{}, %{
+      job_id: job_id,
+      error_reason: error_reason,
+      retry_count: job.retry_count
+    })
+
+    state
+  end
+
+  defp maybe_alert_critical_job_failure(job, error_reason) do
+    if job.priority <= @priority_high do
+      AlertManager.trigger_manual_alert(%{
+        name: "Critical Job Failed",
+        severity: 2,
+        description: "Critical job #{job.name} failed: #{error_reason}",
+        tags: ["job", "failure", "critical"]
+      })
+    end
+  end
+
   defp initialize_job_queues do
     %{
       critical: :queue.new(),
@@ -616,7 +625,7 @@ defmodule FLAME.JobManager do
     %{
       max_retries: Keyword.get(opts, :max_retries, @max_retries),
       base_delay_ms: Keyword.get(opts, :base_retry_delay_ms, 1000),
-      max_delay_ms: Keyword.get(opts, :max_retry_delay_ms, 60000),
+      max_delay_ms: Keyword.get(opts, :max_retry_delay_ms, 60_000),
       backoff_multiplier: Keyword.get(opts, :backoff_multiplier, 2),
       jitter: Keyword.get(opts, :retry_jitter, true)
     }
@@ -827,38 +836,42 @@ defmodule FLAME.JobManager do
       true ->
         case :queue.out(queue) do
           {{:value, job_id}, updated_queue} ->
-            case Map.get(state.active_jobs, job_id) do
-              nil ->
-                # Job was deleted, continue processing
-                process_queue(queue_name, %{
-                  state
-                  | job_queues: Map.put(state.job_queues, queue_name, updated_queue)
-                })
-
-              job when job.state == @state_queued ->
-                # Execute the job
-                state = %{
-                  state
-                  | job_queues: Map.put(state.job_queues, queue_name, updated_queue)
-                }
-
-                state = execute_job(job, state)
-
-                # Continue processing this queue
-                process_queue(queue_name, state)
-
-              _ ->
-                # Job is not in queued state, continue
-                process_queue(queue_name, %{
-                  state
-                  | job_queues: Map.put(state.job_queues, queue_name, updated_queue)
-                })
-            end
+            process_dequeued_job(queue_name, job_id, updated_queue, state)
 
           {:empty, _} ->
             # Queue is empty
             state
         end
+    end
+  end
+
+  defp process_dequeued_job(queue_name, job_id, updated_queue, state) do
+    case Map.get(state.active_jobs, job_id) do
+      nil ->
+        # Job was deleted, continue processing
+        process_queue(queue_name, %{
+          state
+          | job_queues: Map.put(state.job_queues, queue_name, updated_queue)
+        })
+
+      job when job.state == @state_queued ->
+        # Execute the job
+        state = %{
+          state
+          | job_queues: Map.put(state.job_queues, queue_name, updated_queue)
+        }
+
+        state = execute_job(job, state)
+
+        # Continue processing this queue
+        process_queue(queue_name, state)
+
+      _ ->
+        # Job is not in queued state, continue
+        process_queue(queue_name, %{
+          state
+          | job_queues: Map.put(state.job_queues, queue_name, updated_queue)
+        })
     end
   end
 
@@ -911,7 +924,7 @@ defmodule FLAME.JobManager do
             result =
               case job.function do
                 fun when is_function(fun) ->
-                  apply(fun, [job.parameters])
+                  fun.(job.parameters)
 
                 {module, function, args} ->
                   apply(module, function, [job.parameters | args])
@@ -939,10 +952,10 @@ defmodule FLAME.JobManager do
     # Start workflow by identifying and executing initial steps (those with no dependencies)
     initial_steps =
       Enum.filter(workflow.steps, fn step ->
-        length(step.depends_on) == 0
+        step.depends_on == []
       end)
 
-    if length(initial_steps) > 0 do
+    if initial_steps != [] do
       started_workflow = %{
         workflow
         | state: @state_running,
@@ -983,22 +996,24 @@ defmodule FLAME.JobManager do
     # Update workflow step with job ID
     state =
       update_in(state.workflows[workflow_id].steps, fn steps ->
-        Enum.map(steps, fn s ->
-          if s.id == step.id do
-            %{
-              s
-              | job_id: job.id,
-                state: @state_running,
-                started_at: System.system_time(:millisecond)
-            }
-          else
-            s
-          end
-        end)
+        Enum.map(steps, &mark_step_running(&1, step.id, job.id))
       end)
 
     # Enqueue the job
     enqueue_job(job, state)
+  end
+
+  defp mark_step_running(s, step_id, job_id) do
+    if s.id == step_id do
+      %{
+        s
+        | job_id: job_id,
+          state: @state_running,
+          started_at: System.system_time(:millisecond)
+      }
+    else
+      s
+    end
   end
 
   defp check_workflow_completion(completed_job, state) do
@@ -1026,20 +1041,22 @@ defmodule FLAME.JobManager do
 
   defp update_workflow_step_completion(workflow_id, step_id, completed_job, state) do
     update_in(state.workflows[workflow_id].steps, fn steps ->
-      Enum.map(steps, fn step ->
-        if step.id == step_id do
-          %{
-            step
-            | state: completed_job.state,
-              completed_at: completed_job.completed_at,
-              result: completed_job.result,
-              error_message: completed_job.error_message
-          }
-        else
-          step
-        end
-      end)
+      Enum.map(steps, &apply_step_completion(&1, step_id, completed_job))
     end)
+  end
+
+  defp apply_step_completion(step, step_id, completed_job) do
+    if step.id == step_id do
+      %{
+        step
+        | state: completed_job.state,
+          completed_at: completed_job.completed_at,
+          result: completed_job.result,
+          error_message: completed_job.error_message
+      }
+    else
+      step
+    end
   end
 
   defp execute_next_workflow_steps(workflow_id, state) do
@@ -1086,20 +1103,22 @@ defmodule FLAME.JobManager do
 
   defp skip_workflow_step(workflow_id, step, state) do
     update_in(state.workflows[workflow_id].steps, fn steps ->
-      Enum.map(steps, fn s ->
-        if s.id == step.id do
-          %{
-            s
-            | state: @state_completed,
-              started_at: System.system_time(:millisecond),
-              completed_at: System.system_time(:millisecond),
-              result: :skipped
-          }
-        else
-          s
-        end
-      end)
+      Enum.map(steps, &mark_step_skipped(&1, step.id))
     end)
+  end
+
+  defp mark_step_skipped(s, step_id) do
+    if s.id == step_id do
+      %{
+        s
+        | state: @state_completed,
+          started_at: System.system_time(:millisecond),
+          completed_at: System.system_time(:millisecond),
+          result: :skipped
+      }
+    else
+      s
+    end
   end
 
   defp check_workflow_final_completion(workflow_id, state) do
@@ -1196,16 +1215,18 @@ defmodule FLAME.JobManager do
 
   defp apply_job_filters(jobs, filters) do
     Enum.filter(jobs, fn job ->
-      Enum.all?(filters, fn {key, value} ->
-        case key do
-          :state -> job.state == value
-          :priority -> job.priority == value
-          :queue -> job.queue == value
-          :name -> String.contains?(job.name, value)
-          _ -> true
-        end
-      end)
+      Enum.all?(filters, &job_matches_filter?(job, &1))
     end)
+  end
+
+  defp job_matches_filter?(job, {key, value}) do
+    case key do
+      :state -> job.state == value
+      :priority -> job.priority == value
+      :queue -> job.queue == value
+      :name -> String.contains?(job.name, value)
+      _ -> true
+    end
   end
 
   defp update_job(job, state) do

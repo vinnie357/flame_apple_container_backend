@@ -2,10 +2,10 @@ defmodule FLAME.IntegrationTest do
   use ExUnit.Case, async: false
 
   alias FLAME.AppleContainersBackend
-  alias FLAME.ContainerMetrics
-  alias FLAME.SecurityManager
-  alias FLAME.ResourceManager
   alias FLAME.CircuitBreaker
+  alias FLAME.ContainerMetrics
+  alias FLAME.ResourceManager
+  alias FLAME.SecurityManager
 
   @moduletag :integration
 

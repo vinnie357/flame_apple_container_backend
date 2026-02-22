@@ -143,7 +143,7 @@ defmodule FLAME.BenchmarkSuite do
       end,
       medium_task: fn ->
         # CPU-intensive task
-        data = Enum.map(1..10000, &(&1 * :rand.uniform(100)))
+        data = Enum.map(1..10_000, &(&1 * :rand.uniform(100)))
         Enum.sort(data)
       end,
       complex_task: fn ->
@@ -235,37 +235,7 @@ defmodule FLAME.BenchmarkSuite do
     results =
       Enum.reduce(state.benchmark_config.task_complexity_levels, results, fn complexity, acc ->
         task_function = state.test_scenarios[:"#{complexity}_task"]
-
-        execution_times =
-          Enum.map(1..iterations, fn _i ->
-            start_time = System.monotonic_time(:microsecond)
-
-            case FLAME.call(FLAME.Pool, task_function) do
-              {:ok, _result} ->
-                end_time = System.monotonic_time(:microsecond)
-                end_time - start_time
-
-              {:error, _reason} ->
-                nil
-            end
-          end)
-
-        valid_times = Enum.reject(execution_times, &is_nil/1)
-
-        if length(valid_times) > 0 do
-          Map.put(acc, complexity, %{
-            total_iterations: iterations,
-            successful_executions: length(valid_times),
-            min_time: Enum.min(valid_times),
-            max_time: Enum.max(valid_times),
-            avg_time: calculate_average(valid_times),
-            median_time: calculate_median(valid_times),
-            p95_time: calculate_percentile(valid_times, 95),
-            p99_time: calculate_percentile(valid_times, 99)
-          })
-        else
-          Map.put(acc, complexity, %{error: :all_executions_failed})
-        end
+        benchmark_complexity_level(acc, complexity, task_function, iterations)
       end)
 
     {:ok, results}
@@ -279,45 +249,7 @@ defmodule FLAME.BenchmarkSuite do
 
     results =
       Enum.reduce(state.benchmark_config.concurrent_task_counts, %{}, fn concurrency, acc ->
-        Logger.info("Testing throughput with #{concurrency} concurrent tasks")
-
-        start_time = System.monotonic_time(:millisecond)
-        end_time = start_time + duration
-
-        # Start concurrent workers
-        workers =
-          Enum.map(1..concurrency, fn _i ->
-            spawn_link(fn -> throughput_worker(task_function, end_time, 0) end)
-          end)
-
-        # Wait for test duration
-        Process.sleep(duration + 1000)
-
-        # Collect results from workers
-        results =
-          Enum.map(workers, fn worker ->
-            if Process.alive?(worker) do
-              send(worker, {:get_count, self()})
-
-              receive do
-                {:count, count} -> count
-              after
-                1000 -> 0
-              end
-            else
-              0
-            end
-          end)
-
-        total_tasks = Enum.sum(results)
-        tasks_per_second = total_tasks / (duration / 1000)
-
-        Map.put(acc, concurrency, %{
-          total_tasks: total_tasks,
-          tasks_per_second: Float.round(tasks_per_second, 2),
-          duration_ms: duration,
-          concurrent_workers: concurrency
-        })
+        benchmark_throughput_at_concurrency(acc, concurrency, task_function, duration)
       end)
 
     {:ok, results}
@@ -378,7 +310,7 @@ defmodule FLAME.BenchmarkSuite do
     load_phases = [
       # 10 seconds, 1 task/sec
       {10_000, 1},
-      # 20 seconds, 5 tasks/sec  
+      # 20 seconds, 5 tasks/sec
       {20_000, 5},
       # 30 seconds, 10 tasks/sec
       {30_000, 10},
@@ -429,6 +361,82 @@ defmodule FLAME.BenchmarkSuite do
 
   defp run_benchmark_impl(benchmark_name, _state, _opts) do
     {:error, {:unknown_benchmark, benchmark_name}}
+  end
+
+  defp benchmark_complexity_level(acc, complexity, task_function, iterations) do
+    execution_times =
+      Enum.map(1..iterations, fn _i ->
+        start_time = System.monotonic_time(:microsecond)
+
+        case FLAME.call(FLAME.Pool, task_function) do
+          {:ok, _result} ->
+            end_time = System.monotonic_time(:microsecond)
+            end_time - start_time
+
+          {:error, _reason} ->
+            nil
+        end
+      end)
+
+    valid_times = Enum.reject(execution_times, &is_nil/1)
+
+    if valid_times != [] do
+      Map.put(acc, complexity, %{
+        total_iterations: iterations,
+        successful_executions: length(valid_times),
+        min_time: Enum.min(valid_times),
+        max_time: Enum.max(valid_times),
+        avg_time: calculate_average(valid_times),
+        median_time: calculate_median(valid_times),
+        p95_time: calculate_percentile(valid_times, 95),
+        p99_time: calculate_percentile(valid_times, 99)
+      })
+    else
+      Map.put(acc, complexity, %{error: :all_executions_failed})
+    end
+  end
+
+  defp benchmark_throughput_at_concurrency(acc, concurrency, task_function, duration) do
+    Logger.info("Testing throughput with #{concurrency} concurrent tasks")
+
+    start_time = System.monotonic_time(:millisecond)
+    end_time = start_time + duration
+
+    # Start concurrent workers
+    workers =
+      Enum.map(1..concurrency, fn _i ->
+        spawn_link(fn -> throughput_worker(task_function, end_time, 0) end)
+      end)
+
+    # Wait for test duration
+    Process.sleep(duration + 1000)
+
+    # Collect results from workers
+    worker_results = Enum.map(workers, &collect_worker_result/1)
+
+    total_tasks = Enum.sum(worker_results)
+    tasks_per_second = total_tasks / (duration / 1000)
+
+    Map.put(acc, concurrency, %{
+      total_tasks: total_tasks,
+      tasks_per_second: Float.round(tasks_per_second, 2),
+      duration_ms: duration,
+      concurrent_workers: concurrency
+    })
+  end
+
+  defp collect_worker_result(worker) do
+    if Process.alive?(worker) do
+      send(worker, {:get_count, self()})
+
+      receive do
+        {:count, count} -> count
+      after
+        1000 -> 0
+      end
+    else
+      0
+    end
   end
 
   defp throughput_worker(task_function, end_time, count) do

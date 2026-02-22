@@ -37,7 +37,7 @@ defmodule FLAME.AppleContainers.Manager do
   use GenServer
   require Logger
 
-  alias FLAME.AppleContainers.{Pool, Monitor}
+  alias FLAME.AppleContainers.{Monitor, Pool}
   alias FLAME.AppleContainersBackend
 
   defstruct [

@@ -58,7 +58,7 @@ defmodule FLAME.AppleContainers.MonitorTest do
         pool: pool,
         manager: manager,
         health_check_interval: 5000,
-        metrics_collection_interval: 10000,
+        metrics_collection_interval: 10_000,
         alert_thresholds: %{
           cpu_usage: 70.0,
           memory_usage: 75.0
@@ -91,7 +91,7 @@ defmodule FLAME.AppleContainers.MonitorTest do
       assert {:error, {:missing_required_parameter, :pool_or_manager}} =
                Monitor.start_link(manager: manager)
 
-      # Create a mock pool process  
+      # Create a mock pool process
       pool =
         spawn(fn ->
           receive do

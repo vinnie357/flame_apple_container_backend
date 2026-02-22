@@ -163,36 +163,8 @@ defmodule FLAME.ContainerPool do
         {:noreply, state}
 
       {container_info, active_containers} ->
-        # Check if container is healthy and can be returned to warm pool
-        case ContainerHealth.check_container(container_id) do
-          :healthy ->
-            if map_size(state.warm_pool) < state.pool_config.max_warm_containers do
-              # Return to warm pool
-              container_info =
-                container_info
-                |> Map.delete(:client)
-                |> Map.put(:returned_at, System.system_time(:millisecond))
-
-              warm_pool = Map.put(state.warm_pool, container_id, container_info)
-              state = %{state | warm_pool: warm_pool, active_containers: active_containers}
-
-              ContainerMetrics.record_container_return(container_id)
-              Logger.debug("Container #{container_id} returned to warm pool")
-
-              {:noreply, state}
-            else
-              # Warm pool is full, terminate container
-              terminate_container_impl(container_id, :pool_full)
-              state = %{state | active_containers: active_containers}
-              {:noreply, state}
-            end
-
-          :unhealthy ->
-            # Terminate unhealthy container
-            terminate_container_impl(container_id, :unhealthy)
-            state = %{state | active_containers: active_containers}
-            {:noreply, state}
-        end
+        state = process_returned_container(container_id, container_info, active_containers, state)
+        {:noreply, state}
     end
   end
 
@@ -244,6 +216,36 @@ defmodule FLAME.ContainerPool do
   end
 
   # Private functions
+
+  defp process_returned_container(container_id, container_info, active_containers, state) do
+    case ContainerHealth.check_container(container_id) do
+      :healthy ->
+        return_healthy_container(container_id, container_info, active_containers, state)
+
+      :unhealthy ->
+        terminate_container_impl(container_id, :unhealthy)
+        %{state | active_containers: active_containers}
+    end
+  end
+
+  defp return_healthy_container(container_id, container_info, active_containers, state) do
+    if map_size(state.warm_pool) < state.pool_config.max_warm_containers do
+      container_info =
+        container_info
+        |> Map.delete(:client)
+        |> Map.put(:returned_at, System.system_time(:millisecond))
+
+      warm_pool = Map.put(state.warm_pool, container_id, container_info)
+
+      ContainerMetrics.record_container_return(container_id)
+      Logger.debug("Container #{container_id} returned to warm pool")
+
+      %{state | warm_pool: warm_pool, active_containers: active_containers}
+    else
+      terminate_container_impl(container_id, :pool_full)
+      %{state | active_containers: active_containers}
+    end
+  end
 
   defp merge_default_config(config) do
     Map.merge(@default_pool_config, config)
@@ -307,22 +309,26 @@ defmodule FLAME.ContainerPool do
 
       warm_pool =
         Enum.reduce(1..containers_to_provision, state.warm_pool, fn _, acc ->
-          case provision_new_container(state) do
-            {:ok, container_id, container_info} ->
-              container_info =
-                Map.put(container_info, :warmed_at, System.system_time(:millisecond))
-
-              Map.put(acc, container_id, container_info)
-
-            {:error, reason} ->
-              Logger.error("Failed to provision warm container: #{inspect(reason)}")
-              acc
-          end
+          provision_and_add_warm_container(state, acc)
         end)
 
       %{state | warm_pool: warm_pool}
     else
       state
+    end
+  end
+
+  defp provision_and_add_warm_container(state, warm_pool_acc) do
+    case provision_new_container(state) do
+      {:ok, container_id, container_info} ->
+        container_info =
+          Map.put(container_info, :warmed_at, System.system_time(:millisecond))
+
+        Map.put(warm_pool_acc, container_id, container_info)
+
+      {:error, reason} ->
+        Logger.error("Failed to provision warm container: #{inspect(reason)}")
+        warm_pool_acc
     end
   end
 
@@ -399,22 +405,18 @@ defmodule FLAME.ContainerPool do
 
   defp wait_for_readiness(container_name, timeout \\ 30_000) do
     start_time = System.system_time(:millisecond)
-
-    check_readiness = fn ->
-      case System.cmd("container", ["exec", container_name, "epmd", "-names"]) do
-        {output, 0} ->
-          if String.contains?(output, "name ") do
-            :ready
-          else
-            :not_ready
-          end
-
-        _ ->
-          :not_ready
-      end
-    end
-
+    check_readiness = fn -> check_epmd_readiness(container_name) end
     wait_loop(check_readiness, start_time, timeout)
+  end
+
+  defp check_epmd_readiness(container_name) do
+    case System.cmd("container", ["exec", container_name, "epmd", "-names"]) do
+      {output, 0} ->
+        if String.contains?(output, "name "), do: :ready, else: :not_ready
+
+      _ ->
+        :not_ready
+    end
   end
 
   defp wait_loop(check_fn, start_time, timeout) do

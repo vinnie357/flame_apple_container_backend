@@ -10,8 +10,8 @@ defmodule FLAME.Security.PolicyEngine do
   require Logger
   import Bitwise
 
-  alias FLAME.Security.AuditLogger
   alias FLAME.AlertManager
+  alias FLAME.Security.AuditLogger
 
   # Policy types supported
   @policy_types [
@@ -235,51 +235,12 @@ defmodule FLAME.Security.PolicyEngine do
       nil ->
         {:reply, {:error, :policy_not_found}, state}
 
+      %{enabled: false} ->
+        {:reply, {:ok, %{decision: :not_applicable, reason: "policy_disabled"}}, state}
+
       policy ->
-        if policy.enabled do
-          # Check cache first
-          cache_key = generate_cache_key(policy_id, context)
-
-          case Map.get(state.evaluation_cache, cache_key) do
-            nil ->
-              # Record cache miss
-              record_cache_metric(:miss)
-
-              # Evaluate policy
-              result = evaluate_policy_impl(policy, context)
-
-              # Cache result for 5 minutes
-              cache_entry = {result, DateTime.utc_now()}
-              updated_cache = Map.put(state.evaluation_cache, cache_key, cache_entry)
-              updated_state = %{state | evaluation_cache: updated_cache}
-
-              # Record metrics
-              record_policy_evaluation(policy, result, updated_state)
-
-              {:reply, {:ok, result}, updated_state}
-
-            {cached_result, cached_at} ->
-              # Check if cache is still valid (5 minutes)
-              if DateTime.diff(DateTime.utc_now(), cached_at, :second) < 300 do
-                # Record cache hit
-                record_cache_metric(:hit)
-                {:reply, {:ok, cached_result}, state}
-              else
-                # Expired entry counts as a miss
-                record_cache_metric(:miss)
-
-                # Re-evaluate and update cache
-                result = evaluate_policy_impl(policy, context)
-                cache_entry = {result, DateTime.utc_now()}
-                updated_cache = Map.put(state.evaluation_cache, cache_key, cache_entry)
-                updated_state = %{state | evaluation_cache: updated_cache}
-
-                {:reply, {:ok, result}, updated_state}
-              end
-          end
-        else
-          {:reply, {:ok, %{decision: :not_applicable, reason: "policy_disabled"}}, state}
-        end
+        {result, updated_state} = evaluate_policy_with_cache(policy, policy_id, context, state)
+        {:reply, {:ok, result}, updated_state}
     end
   end
 
@@ -388,6 +349,33 @@ defmodule FLAME.Security.PolicyEngine do
 
   # Private implementation
 
+  defp evaluate_policy_with_cache(policy, policy_id, context, state) do
+    cache_key = generate_cache_key(policy_id, context)
+
+    case Map.get(state.evaluation_cache, cache_key) do
+      nil ->
+        evaluate_and_cache_policy(policy, cache_key, context, state)
+
+      {cached_result, cached_at} ->
+        if DateTime.diff(DateTime.utc_now(), cached_at, :second) < 300 do
+          record_cache_metric(:hit)
+          {cached_result, state}
+        else
+          evaluate_and_cache_policy(policy, cache_key, context, state)
+        end
+    end
+  end
+
+  defp evaluate_and_cache_policy(policy, cache_key, context, state) do
+    record_cache_metric(:miss)
+    result = evaluate_policy_impl(policy, context)
+    cache_entry = {result, DateTime.utc_now()}
+    updated_cache = Map.put(state.evaluation_cache, cache_key, cache_entry)
+    updated_state = %{state | evaluation_cache: updated_cache}
+    record_policy_evaluation(policy, result, updated_state)
+    {result, updated_state}
+  end
+
   defp validate_policy_spec(policy_spec) do
     required_fields = [:name, :type, :conditions, :actions]
 
@@ -485,36 +473,45 @@ defmodule FLAME.Security.PolicyEngine do
     }
   end
 
-  defp evaluate_single_condition(condition, context) do
-    case condition do
-      %{type: "user_role", operator: "in", values: roles} ->
-        user_roles = get_in(context, [:user, :roles]) || []
-        not Enum.empty?(user_roles -- (user_roles -- roles))
+  defp evaluate_single_condition(%{type: "user_role", operator: "in", values: roles}, context) do
+    user_roles = get_in(context, [:user, :roles]) || []
+    not Enum.empty?(user_roles -- (user_roles -- roles))
+  end
 
-      %{type: "resource_owner", operator: "equals"} ->
-        user_id = get_in(context, [:user, :id])
-        resource_owner = get_in(context, [:resource, :owner_id])
-        user_id == resource_owner
+  defp evaluate_single_condition(%{type: "resource_owner", operator: "equals"}, context) do
+    user_id = get_in(context, [:user, :id])
+    resource_owner = get_in(context, [:resource, :owner_id])
+    user_id == resource_owner
+  end
 
-      %{type: "time_range", start_hour: start_h, end_hour: end_h} ->
-        current_hour = DateTime.utc_now().hour
-        current_hour >= start_h and current_hour <= end_h
+  defp evaluate_single_condition(
+         %{type: "time_range", start_hour: start_h, end_hour: end_h},
+         _context
+       ) do
+    current_hour = DateTime.utc_now().hour
+    current_hour >= start_h and current_hour <= end_h
+  end
 
-      %{type: "ip_address", operator: "in_range", cidr: cidr} ->
-        client_ip = get_in(context, [:request, :ip])
-        ip_in_cidr?(client_ip, cidr)
+  defp evaluate_single_condition(%{type: "ip_address", operator: "in_range", cidr: cidr}, context) do
+    client_ip = get_in(context, [:request, :ip])
+    ip_in_cidr?(client_ip, cidr)
+  end
 
-      %{type: "resource_type", operator: "equals", value: resource_type} ->
-        context_resource_type = get_in(context, [:resource, :type])
-        context_resource_type == resource_type
+  defp evaluate_single_condition(
+         %{type: "resource_type", operator: "equals", value: resource_type},
+         context
+       ) do
+    context_resource_type = get_in(context, [:resource, :type])
+    context_resource_type == resource_type
+  end
 
-      %{type: "custom", function: function_name, args: args} ->
-        evaluate_custom_condition(function_name, args, context)
+  defp evaluate_single_condition(%{type: "custom", function: function_name, args: args}, context) do
+    evaluate_custom_condition(function_name, args, context)
+  end
 
-      _ ->
-        Logger.warning("Unknown condition type: #{inspect(condition)}")
-        false
-    end
+  defp evaluate_single_condition(condition, _context) do
+    Logger.warning("Unknown condition type: #{inspect(condition)}")
+    false
   end
 
   defp execute_actions(actions, context) do
@@ -530,50 +527,48 @@ defmodule FLAME.Security.PolicyEngine do
   end
 
   defp execute_single_action(action, context) do
-    try do
-      case action do
-        %{type: "audit_log", level: level, message: message} ->
-          AuditLogger.log_security_event(%{
-            event: "policy_action_executed",
-            action_type: "audit_log",
-            level: level,
-            message: message,
-            context: context,
-            timestamp: DateTime.utc_now()
-          })
+    case action do
+      %{type: "audit_log", level: level, message: message} ->
+        AuditLogger.log_security_event(%{
+          event: "policy_action_executed",
+          action_type: "audit_log",
+          level: level,
+          message: message,
+          context: context,
+          timestamp: DateTime.utc_now()
+        })
 
-          %{action: action, success: true}
+        %{action: action, success: true}
 
-        %{type: "send_alert", severity: severity, message: message} ->
-          AlertManager.create_alert(%{
-            type: "policy_alert",
-            severity: severity,
-            title: "Policy Action Alert",
-            description: message,
-            metadata: context
-          })
+      %{type: "send_alert", severity: severity, message: message} ->
+        AlertManager.create_alert(%{
+          type: "policy_alert",
+          severity: severity,
+          title: "Policy Action Alert",
+          description: message,
+          metadata: context
+        })
 
-          %{action: action, success: true}
+        %{action: action, success: true}
 
-        %{type: "block_request"} ->
-          # This would typically set a flag in the context
-          # that the calling system would check
-          %{action: action, success: true, effect: :block}
+      %{type: "block_request"} ->
+        # This would typically set a flag in the context
+        # that the calling system would check
+        %{action: action, success: true, effect: :block}
 
-        %{type: "rate_limit", limit: limit, window: window} ->
-          # Implement rate limiting logic
-          apply_rate_limit(context, limit, window)
-          %{action: action, success: true}
+      %{type: "rate_limit", limit: limit, window: window} ->
+        # Implement rate limiting logic
+        apply_rate_limit(context, limit, window)
+        %{action: action, success: true}
 
-        _ ->
-          Logger.warning("Unknown action type: #{inspect(action)}")
-          %{action: action, success: false, reason: "unknown_action_type"}
-      end
-    catch
-      kind, reason ->
-        Logger.error("Action execution failed: #{inspect({kind, reason})}")
-        %{action: action, success: false, error: %{kind: kind, reason: reason}}
+      _ ->
+        Logger.warning("Unknown action type: #{inspect(action)}")
+        %{action: action, success: false, reason: "unknown_action_type"}
     end
+  catch
+    kind, reason ->
+      Logger.error("Action execution failed: #{inspect({kind, reason})}")
+      %{action: action, success: false, error: %{kind: kind, reason: reason}}
   end
 
   defp evaluate_policy_set_impl(policy_set, context, state) do
@@ -684,16 +679,17 @@ defmodule FLAME.Security.PolicyEngine do
     policies
     |> Map.values()
     |> Enum.filter(fn policy ->
-      Enum.all?(filter, fn {key, value} ->
-        case key do
-          :type -> policy.type == value
-          :enabled -> policy.enabled == value
-          :name_contains -> String.contains?(policy.name, value)
-          _ -> true
-        end
-      end)
+      Enum.all?(filter, &policy_matches_filter?(policy, &1))
     end)
   end
+
+  defp policy_matches_filter?(policy, {:type, value}), do: policy.type == value
+  defp policy_matches_filter?(policy, {:enabled, value}), do: policy.enabled == value
+
+  defp policy_matches_filter?(policy, {:name_contains, value}),
+    do: String.contains?(policy.name, value)
+
+  defp policy_matches_filter?(_policy, {_key, _value}), do: true
 
   defp record_policy_evaluation(policy, result, _state) do
     Logger.debug("Policy #{policy.id} evaluated with decision: #{result.decision}")

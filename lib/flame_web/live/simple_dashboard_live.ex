@@ -316,20 +316,25 @@ defmodule FlameWeb.SimpleDashboardLive do
   defp get_uptime do
     # Get rough uptime in minutes
     case System.cmd("uptime", []) do
-      {output, 0} ->
-        case Regex.run(~r/up\s+(\d+):(\d+)/, output) do
-          [_, hours, minutes] ->
-            String.to_integer(hours) * 60 + String.to_integer(minutes)
+      {output, 0} -> parse_uptime_output(output)
+      _ -> 42
+    end
+  end
 
-          _ ->
-            case Regex.run(~r/up\s+(\d+)\s+min/, output) do
-              [_, minutes] -> String.to_integer(minutes)
-              _ -> 42
-            end
-        end
+  defp parse_uptime_output(output) do
+    case Regex.run(~r/up\s+(\d+):(\d+)/, output) do
+      [_, hours, minutes] ->
+        String.to_integer(hours) * 60 + String.to_integer(minutes)
 
       _ ->
-        42
+        parse_uptime_minutes(output)
+    end
+  end
+
+  defp parse_uptime_minutes(output) do
+    case Regex.run(~r/up\s+(\d+)\s+min/, output) do
+      [_, minutes] -> String.to_integer(minutes)
+      _ -> 42
     end
   end
 

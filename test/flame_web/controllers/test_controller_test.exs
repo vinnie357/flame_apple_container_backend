@@ -224,7 +224,7 @@ defmodule FlameWeb.TestControllerTest do
           assert true
 
         :exit, :shutdown ->
-          # ContainerMetrics was shut down during test suite - acceptable in test environment  
+          # ContainerMetrics was shut down during test suite - acceptable in test environment
           assert true
       end
     end
@@ -347,7 +347,7 @@ defmodule FlameWeb.TestControllerTest do
           assert true
 
         :exit, :shutdown ->
-          # ContainerMetrics was shut down during test suite - acceptable in test environment  
+          # ContainerMetrics was shut down during test suite - acceptable in test environment
           assert true
       end
     end

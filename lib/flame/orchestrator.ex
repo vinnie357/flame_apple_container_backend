@@ -217,43 +217,57 @@ defmodule FLAME.Orchestrator do
   defp create_cluster_impl(cluster_spec, state) do
     cluster_id = generate_cluster_id()
 
-    # Validate cluster specification
-    case validate_cluster_spec(cluster_spec, state) do
-      :ok ->
-        # Provision containers for the cluster
-        case provision_cluster_containers(cluster_spec, cluster_id) do
-          {:ok, containers} ->
-            cluster_info = %{
-              cluster_id: cluster_id,
-              spec: cluster_spec,
-              containers: containers,
-              created_at: System.system_time(:millisecond),
-              status: :active,
-              task_assignments: %{},
-              cluster_state: %{}
-            }
+    with :ok <- validate_cluster_spec(cluster_spec, state),
+         {:ok, containers} <- provision_cluster_containers(cluster_spec, cluster_id) do
+      cluster_info = build_cluster_info(cluster_id, cluster_spec, containers)
+      maybe_schedule_cluster_timeout(cluster_id, cluster_spec)
 
-            # Set cluster timeout if specified
-            if cluster_spec[:timeout] do
-              Process.send_after(self(), {:cluster_timeout, cluster_id}, cluster_spec.timeout)
-            end
-
-            {:ok, cluster_id, cluster_info}
-
-          {:error, reason} ->
-            {:error, {:container_provisioning_failed, reason}}
-        end
-
+      {:ok, cluster_id, cluster_info}
+    else
       {:error, reason} ->
-        {:error, {:invalid_cluster_spec, reason}}
+        wrap_cluster_creation_error(reason)
+    end
+  end
+
+  defp build_cluster_info(cluster_id, cluster_spec, containers) do
+    %{
+      cluster_id: cluster_id,
+      spec: cluster_spec,
+      containers: containers,
+      created_at: System.system_time(:millisecond),
+      status: :active,
+      task_assignments: %{},
+      cluster_state: %{}
+    }
+  end
+
+  defp maybe_schedule_cluster_timeout(cluster_id, cluster_spec) do
+    if cluster_spec[:timeout] do
+      Process.send_after(self(), {:cluster_timeout, cluster_id}, cluster_spec.timeout)
+    end
+  end
+
+  defp wrap_cluster_creation_error(reason) do
+    case reason do
+      {:container_provisioning_failed, _} -> {:error, reason}
+      {:partial_provisioning_failure, _} -> {:error, {:container_provisioning_failed, reason}}
+      _ -> {:error, {:invalid_cluster_spec, reason}}
     end
   end
 
   defp validate_cluster_spec(cluster_spec, state) do
-    cond do
-      not is_map(cluster_spec) ->
-        {:error, :invalid_cluster_type}
+    with :ok <- validate_cluster_type(cluster_spec),
+         :ok <- validate_cluster_size(cluster_spec, state) do
+      validate_cluster_name(cluster_spec)
+    end
+  end
 
+  defp validate_cluster_type(cluster_spec) do
+    if is_map(cluster_spec), do: :ok, else: {:error, :invalid_cluster_type}
+  end
+
+  defp validate_cluster_size(cluster_spec, state) do
+    cond do
       not Map.has_key?(cluster_spec, :size) ->
         {:error, :missing_cluster_size}
 
@@ -266,6 +280,13 @@ defmodule FLAME.Orchestrator do
       cluster_spec.size < 1 ->
         {:error, :invalid_cluster_size}
 
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_cluster_name(cluster_spec) do
+    cond do
       not Map.has_key?(cluster_spec, :name) ->
         {:error, :missing_cluster_name}
 
@@ -349,40 +370,38 @@ defmodule FLAME.Orchestrator do
   end
 
   defp provision_single_container(config) do
-    try do
-      case ContainerPool.get_container() do
-        {:ok, container_info} ->
-          # Configure container for cluster
-          enhanced_container =
-            Map.merge(container_info, %{
-              cluster_id: config.cluster_id,
-              container_index: config.container_index,
-              role: config.labels.container_role,
-              labels: config.labels
-            })
+    case ContainerPool.get_container() do
+      {:ok, container_info} ->
+        # Configure container for cluster
+        enhanced_container =
+          Map.merge(container_info, %{
+            cluster_id: config.cluster_id,
+            container_index: config.container_index,
+            role: config.labels.container_role,
+            labels: config.labels
+          })
 
-          {:ok, enhanced_container}
+        {:ok, enhanced_container}
 
-        {:error, reason} ->
-          {:error, reason}
-      end
-    catch
-      :exit, {:noproc, _} ->
-        # ContainerPool not started, return test stub
-        {:ok,
-         %{
-           container_id: "test-container-#{config.container_index}",
-           cluster_id: config.cluster_id,
-           container_index: config.container_index,
-           role: config.labels.container_role,
-           labels: config.labels,
-           status: :test_mode,
-           started_at: System.system_time(:millisecond)
-         }}
-
-      :exit, reason ->
-        {:error, {:container_pool_error, reason}}
+      {:error, reason} ->
+        {:error, reason}
     end
+  catch
+    :exit, {:noproc, _} ->
+      # ContainerPool not started, return test stub
+      {:ok,
+       %{
+         container_id: "test-container-#{config.container_index}",
+         cluster_id: config.cluster_id,
+         container_index: config.container_index,
+         role: config.labels.container_role,
+         labels: config.labels,
+         status: :test_mode,
+         started_at: System.system_time(:millisecond)
+       }}
+
+    :exit, reason ->
+      {:error, {:container_pool_error, reason}}
   end
 
   defp destroy_cluster_impl(cluster_id, cluster_info) do
@@ -400,38 +419,31 @@ defmodule FLAME.Orchestrator do
   end
 
   defp schedule_task_impl(task_spec, state) do
-    # Find best cluster for the task based on affinity rules
-    case find_best_cluster(task_spec, state) do
-      {:ok, cluster_id} ->
-        cluster_info = Map.get(state.active_clusters, cluster_id)
-
-        # Select container within cluster
-        case select_container_in_cluster(task_spec, cluster_info, state) do
-          {:ok, container} ->
-            task_id = generate_task_id()
-
-            # Execute task on selected container
-            case execute_task_on_container(task_spec, container, task_id) do
-              {:ok, execution_info} ->
-                {:ok, task_id, Map.put(execution_info, :cluster_id, cluster_id)}
-
-              {:error, reason} ->
-                {:error, {:task_execution_failed, reason}}
-            end
-
-          {:error, reason} ->
-            {:error, {:container_selection_failed, reason}}
-        end
-
+    with {:ok, cluster_id} <- find_best_cluster(task_spec, state),
+         cluster_info = Map.get(state.active_clusters, cluster_id),
+         {:ok, container} <- select_container_in_cluster(task_spec, cluster_info, state),
+         task_id = generate_task_id(),
+         {:ok, execution_info} <- execute_task_on_container(task_spec, container, task_id) do
+      {:ok, task_id, Map.put(execution_info, :cluster_id, cluster_id)}
+    else
       {:error, reason} ->
-        {:error, {:cluster_selection_failed, reason}}
+        wrap_task_scheduling_error(reason)
+    end
+  end
+
+  defp wrap_task_scheduling_error(reason) do
+    case reason do
+      {:rpc_failed, _} -> {:error, {:task_execution_failed, reason}}
+      :no_available_containers -> {:error, {:container_selection_failed, reason}}
+      :no_clusters_available -> {:error, {:cluster_selection_failed, reason}}
+      _ -> {:error, reason}
     end
   end
 
   defp find_best_cluster(task_spec, state) do
     clusters = Map.values(state.active_clusters)
 
-    if length(clusters) == 0 do
+    if clusters == [] do
       {:error, :no_clusters_available}
     else
       # Score clusters based on affinity rules and current load
@@ -613,7 +625,7 @@ defmodule FLAME.Orchestrator do
       not Map.has_key?(workflow_spec, :steps) ->
         {:error, :missing_workflow_steps}
 
-      not is_list(workflow_spec.steps) or length(workflow_spec.steps) == 0 ->
+      not is_list(workflow_spec.steps) or workflow_spec.steps == [] ->
         {:error, :no_workflow_steps}
 
       not Map.has_key?(workflow_spec, :name) ->
@@ -758,12 +770,14 @@ defmodule FLAME.Orchestrator do
       # No resource information on the cluster; assume sufficient
       true
     else
-      Enum.all?(requirements, fn {resource, required_amount} ->
-        case Map.get(available, resource) do
-          nil -> true
-          cluster_amount -> cluster_amount >= required_amount
-        end
-      end)
+      Enum.all?(requirements, &resource_meets_requirement(available, &1))
+    end
+  end
+
+  defp resource_meets_requirement(available, {resource, required_amount}) do
+    case Map.get(available, resource) do
+      nil -> true
+      cluster_amount -> cluster_amount >= required_amount
     end
   end
 

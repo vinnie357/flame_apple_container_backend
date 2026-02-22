@@ -16,8 +16,8 @@ defmodule FlameWeb.EnterpriseDashboardLive do
   require Logger
 
   alias FLAME.{
-    ClusterManager,
     AlertManager,
+    ClusterManager,
     ImageManager,
     JobManager
   }
@@ -75,40 +75,36 @@ defmodule FlameWeb.EnterpriseDashboardLive do
 
   # Cluster Management Events
   def handle_event("register_cluster", %{"cluster_config" => config}, socket) do
-    try do
-      case ClusterManager.register_cluster(config["id"], parse_cluster_config(config)) do
-        {:ok, _cluster_info} ->
-          socket = put_flash(socket, :info, "Cluster #{config["id"]} registered successfully")
-          socket = refresh_cluster_data(socket)
-          {:noreply, socket}
+    case ClusterManager.register_cluster(config["id"], parse_cluster_config(config)) do
+      {:ok, _cluster_info} ->
+        socket = put_flash(socket, :info, "Cluster #{config["id"]} registered successfully")
+        socket = refresh_cluster_data(socket)
+        {:noreply, socket}
 
-        {:error, reason} ->
-          socket = put_flash(socket, :error, "Failed to register cluster: #{reason}")
-          {:noreply, socket}
-      end
-    catch
-      _ ->
-        socket = put_flash(socket, :error, "Cluster management not available")
+      {:error, reason} ->
+        socket = put_flash(socket, :error, "Failed to register cluster: #{reason}")
         {:noreply, socket}
     end
+  catch
+    _ ->
+      socket = put_flash(socket, :error, "Cluster management not available")
+      {:noreply, socket}
   end
 
   def handle_event("trigger_failover", %{"from_cluster" => from, "to_cluster" => to}, socket) do
-    try do
-      case ClusterManager.trigger_failover(from, to, "manual_dashboard") do
-        :ok ->
-          socket = put_flash(socket, :info, "Failover initiated from #{from} to #{to}")
-          {:noreply, socket}
+    case ClusterManager.trigger_failover(from, to, "manual_dashboard") do
+      :ok ->
+        socket = put_flash(socket, :info, "Failover initiated from #{from} to #{to}")
+        {:noreply, socket}
 
-        {:error, reason} ->
-          socket = put_flash(socket, :error, "Failover failed: #{reason}")
-          {:noreply, socket}
-      end
-    catch
-      _ ->
-        socket = put_flash(socket, :error, "Cluster management not available")
+      {:error, reason} ->
+        socket = put_flash(socket, :error, "Failover failed: #{reason}")
         {:noreply, socket}
     end
+  catch
+    _ ->
+      socket = put_flash(socket, :error, "Cluster management not available")
+      {:noreply, socket}
   end
 
   # Alert Management Events
@@ -1336,47 +1332,39 @@ defmodule FlameWeb.EnterpriseDashboardLive do
   # Data fetching functions (these would call the actual managers)
 
   defp get_cluster_status do
-    try do
-      case GenServer.call(ClusterManager, :get_cluster_status, 5000) do
-        clusters when is_list(clusters) -> clusters
-        _ -> []
-      end
-    catch
+    case GenServer.call(ClusterManager, :get_cluster_status, 5000) do
+      clusters when is_list(clusters) -> clusters
       _ -> []
     end
+  catch
+    _ -> []
   end
 
   defp get_active_alerts do
-    try do
-      case GenServer.call(AlertManager, :get_active_alerts, 5000) do
-        alerts when is_list(alerts) -> alerts
-        _ -> []
-      end
-    catch
+    case GenServer.call(AlertManager, :get_active_alerts, 5000) do
+      alerts when is_list(alerts) -> alerts
       _ -> []
     end
+  catch
+    _ -> []
   end
 
   defp get_image_list do
-    try do
-      case GenServer.call(ImageManager, {:list_images, %{}}, 5000) do
-        images when is_list(images) -> images
-        _ -> []
-      end
-    catch
+    case GenServer.call(ImageManager, {:list_images, %{}}, 5000) do
+      images when is_list(images) -> images
       _ -> []
     end
+  catch
+    _ -> []
   end
 
   defp get_job_list do
-    try do
-      case GenServer.call(JobManager, {:list_jobs, %{}}, 5000) do
-        jobs when is_list(jobs) -> jobs
-        _ -> []
-      end
-    catch
+    case GenServer.call(JobManager, {:list_jobs, %{}}, 5000) do
+      jobs when is_list(jobs) -> jobs
       _ -> []
     end
+  catch
+    _ -> []
   end
 
   # Helper functions for calculations and formatting
@@ -1455,14 +1443,12 @@ defmodule FlameWeb.EnterpriseDashboardLive do
   end
 
   defp get_job_queue_sizes do
-    try do
-      case GenServer.call(JobManager, :get_job_metrics, 5000) do
-        %{queue_sizes: sizes} -> sizes
-        _ -> %{critical: 0, high: 0, normal: 0, low: 0, batch: 0}
-      end
-    catch
+    case GenServer.call(JobManager, :get_job_metrics, 5000) do
+      %{queue_sizes: sizes} -> sizes
       _ -> %{critical: 0, high: 0, normal: 0, low: 0, batch: 0}
     end
+  catch
+    _ -> %{critical: 0, high: 0, normal: 0, low: 0, batch: 0}
   end
 
   defp get_workflow_summary do

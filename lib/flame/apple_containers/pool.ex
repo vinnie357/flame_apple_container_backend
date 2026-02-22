@@ -236,14 +236,7 @@ defmodule FLAME.AppleContainers.Pool do
           :ok
 
         {:error, :initializing} ->
-          current_time = System.monotonic_time(:millisecond)
-
-          if current_time - start_time < timeout do
-            :timer.sleep(10)
-            wait_loop.(wait_loop)
-          else
-            {:error, :timeout}
-          end
+          retry_or_timeout(start_time, timeout, wait_loop)
       end
     end
 
@@ -276,14 +269,7 @@ defmodule FLAME.AppleContainers.Pool do
           :ok
 
         {:error, :scaling_in_progress} ->
-          current_time = System.monotonic_time(:millisecond)
-
-          if current_time - start_time < timeout do
-            :timer.sleep(10)
-            wait_loop.(wait_loop)
-          else
-            {:error, :timeout}
-          end
+          retry_or_timeout(start_time, timeout, wait_loop)
       end
     end
 
@@ -359,47 +345,10 @@ defmodule FLAME.AppleContainers.Pool do
   def handle_call(:acquire_container, from, state) do
     case :queue.out(state.available_queue) do
       {{:value, container_id}, new_queue} ->
-        # Mark container as busy
-        container = Map.get(state.containers, container_id)
-
-        if container && container.state == :available do
-          updated_container = Map.put(container, :state, :busy)
-          containers = Map.put(state.containers, container_id, updated_container)
-
-          state = %{state | containers: containers, available_queue: new_queue}
-
-          # Update metrics
-          metrics = update_acquisition_metrics(state.metrics)
-          state = %{state | metrics: metrics}
-
-          Logger.debug("Container #{container_id} acquired")
-          {:reply, {:ok, updated_container}, state}
-        else
-          # Container doesn't exist or isn't available, try again
-          Logger.warning("Container #{container_id} no longer available, retrying")
-          handle_call(:acquire_container, from, state)
-        end
+        acquire_from_queue(container_id, new_queue, from, state)
 
       {:empty, _queue} ->
-        # No containers available, check if we can scale up
-        if can_scale_up?(state) do
-          # Start creating a new container
-          Logger.debug("No containers available, creating new container")
-          pool_pid = self()
-          spawn(fn -> create_container_async(pool_pid, state) end)
-
-          # Queue the request to be fulfilled when container is ready
-          pending_requests = :queue.in(from, state.pending_requests)
-          state = %{state | pending_requests: pending_requests}
-
-          {:noreply, state}
-        else
-          Logger.warning(
-            "No containers available and cannot scale up (current: #{map_size(state.containers)}, max: #{state.config.max_size})"
-          )
-
-          {:reply, {:error, :no_containers_available}, state}
-        end
+        acquire_with_scale_up(from, state)
     end
   end
 
@@ -467,39 +416,17 @@ defmodule FLAME.AppleContainers.Pool do
 
   @impl true
   def handle_call({:scale, new_size}, _from, state) do
-    if new_size >= state.config.min_size && new_size <= state.config.max_size do
-      # Check if scaling is already in progress
-      if state.scaling_in_progress do
+    cond do
+      new_size < state.config.min_size or new_size > state.config.max_size ->
+        {:reply, {:error, :invalid_size}, state}
+
+      state.scaling_in_progress ->
         Logger.warning("Scaling already in progress, rejecting concurrent scale request")
         {:reply, {:error, :scaling_in_progress}, state}
-      else
-        current_size = map_size(state.containers)
 
-        updated_state =
-          cond do
-            new_size > current_size ->
-              # Scale up
-              containers_to_add = new_size - current_size
-              new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_up}
-              send(self(), {:scale_up, containers_to_add})
-              new_state
-
-            new_size < current_size ->
-              # Scale down
-              containers_to_remove = current_size - new_size
-              new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_down}
-              send(self(), {:scale_down, containers_to_remove})
-              new_state
-
-            true ->
-              # No change needed
-              state
-          end
-
+      true ->
+        updated_state = apply_scaling(new_size, state)
         {:reply, :ok, updated_state}
-      end
-    else
-      {:reply, {:error, :invalid_size}, state}
     end
   end
 
@@ -593,14 +520,7 @@ defmodule FLAME.AppleContainers.Pool do
     Enum.each(1..size, fn i ->
       Logger.debug("Spawning container creation process #{i} for pool #{inspect(pool_pid)}")
       # Stagger container creation to avoid overwhelming the system
-      spawn(fn ->
-        if i > 1 do
-          # Small delay between container creations
-          :timer.sleep((i - 1) * 5)
-        end
-
-        create_container_async(pool_pid, state)
-      end)
+      spawn(fn -> staggered_container_creation(i, pool_pid, state) end)
     end)
 
     # Clear scaling lock after all containers should be created
@@ -856,6 +776,95 @@ defmodule FLAME.AppleContainers.Pool do
 
   ## Private Helper Functions
 
+  defp staggered_container_creation(index, pool_pid, state) do
+    if index > 1 do
+      # Small delay between container creations
+      :timer.sleep((index - 1) * 5)
+    end
+
+    create_container_async(pool_pid, state)
+  end
+
+  defp apply_scaling(new_size, state) do
+    current_size = map_size(state.containers)
+
+    cond do
+      new_size > current_size ->
+        # Scale up
+        containers_to_add = new_size - current_size
+        new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_up}
+        send(self(), {:scale_up, containers_to_add})
+        new_state
+
+      new_size < current_size ->
+        # Scale down
+        containers_to_remove = current_size - new_size
+        new_state = %{state | scaling_in_progress: true, scaling_lock: :scale_down}
+        send(self(), {:scale_down, containers_to_remove})
+        new_state
+
+      true ->
+        # No change needed
+        state
+    end
+  end
+
+  defp acquire_from_queue(container_id, new_queue, from, state) do
+    # Mark container as busy
+    container = Map.get(state.containers, container_id)
+
+    if container && container.state == :available do
+      updated_container = Map.put(container, :state, :busy)
+      containers = Map.put(state.containers, container_id, updated_container)
+
+      state = %{state | containers: containers, available_queue: new_queue}
+
+      # Update metrics
+      metrics = update_acquisition_metrics(state.metrics)
+      state = %{state | metrics: metrics}
+
+      Logger.debug("Container #{container_id} acquired")
+      {:reply, {:ok, updated_container}, state}
+    else
+      # Container doesn't exist or isn't available, try again
+      Logger.warning("Container #{container_id} no longer available, retrying")
+      handle_call(:acquire_container, from, state)
+    end
+  end
+
+  defp acquire_with_scale_up(from, state) do
+    # No containers available, check if we can scale up
+    if can_scale_up?(state) do
+      # Start creating a new container
+      Logger.debug("No containers available, creating new container")
+      pool_pid = self()
+      spawn(fn -> create_container_async(pool_pid, state) end)
+
+      # Queue the request to be fulfilled when container is ready
+      pending_requests = :queue.in(from, state.pending_requests)
+      state = %{state | pending_requests: pending_requests}
+
+      {:noreply, state}
+    else
+      Logger.warning(
+        "No containers available and cannot scale up (current: #{map_size(state.containers)}, max: #{state.config.max_size})"
+      )
+
+      {:reply, {:error, :no_containers_available}, state}
+    end
+  end
+
+  defp retry_or_timeout(start_time, timeout, wait_loop) do
+    current_time = System.monotonic_time(:millisecond)
+
+    if current_time - start_time < timeout do
+      :timer.sleep(10)
+      wait_loop.(wait_loop)
+    else
+      {:error, :timeout}
+    end
+  end
+
   defp merge_config(opts) do
     config =
       Enum.reduce(opts, @default_config, fn {key, value}, acc ->
@@ -883,43 +892,41 @@ defmodule FLAME.AppleContainers.Pool do
   end
 
   defp create_container_async(pool_pid, state) do
-    try do
-      container_id = generate_container_id()
-      Logger.debug("Starting container creation: #{container_id}")
+    container_id = generate_container_id()
+    Logger.debug("Starting container creation: #{container_id}")
 
-      # Simulate container creation (in reality, this would use the backend)
-      container_info = %{
-        id: container_id,
-        name: "#{state.config.container_prefix || "flame"}-#{container_id}",
-        created_at: System.monotonic_time(:millisecond),
-        state: :initializing,
-        resource_limits: state.config.resource_limits,
-        health_status: :healthy,
-        last_health_check: System.monotonic_time(:millisecond)
-      }
+    # Simulate container creation (in reality, this would use the backend)
+    container_info = %{
+      id: container_id,
+      name: "#{state.config.container_prefix || "flame"}-#{container_id}",
+      created_at: System.monotonic_time(:millisecond),
+      state: :initializing,
+      resource_limits: state.config.resource_limits,
+      health_status: :healthy,
+      last_health_check: System.monotonic_time(:millisecond)
+    }
 
-      # Simulate creation time (optimized for performance tests)
-      sleep_time =
-        if Mix.env() == :test do
-          # 10-50ms for tests - much faster for performance tests
-          :rand.uniform(40) + 10
-        else
-          # 500-1500ms for production - still reasonable
-          :rand.uniform(1000) + 500
-        end
+    # Simulate creation time (optimized for performance tests)
+    sleep_time =
+      if Mix.env() == :test do
+        # 10-50ms for tests - much faster for performance tests
+        :rand.uniform(40) + 10
+      else
+        # 500-1500ms for production - still reasonable
+        :rand.uniform(1000) + 500
+      end
 
-      :timer.sleep(sleep_time)
+    :timer.sleep(sleep_time)
 
-      Logger.debug(
-        "Container #{container_id} creation completed, sending message to pool #{inspect(pool_pid)}"
-      )
+    Logger.debug(
+      "Container #{container_id} creation completed, sending message to pool #{inspect(pool_pid)}"
+    )
 
-      send(pool_pid, {:container_created, container_info})
-    rescue
-      e ->
-        Logger.error("Container creation failed: #{inspect(e)}")
-        send(pool_pid, {:container_creation_failed, e})
-    end
+    send(pool_pid, {:container_created, container_info})
+  rescue
+    e ->
+      Logger.error("Container creation failed: #{inspect(e)}")
+      send(pool_pid, {:container_creation_failed, e})
   end
 
   defp terminate_container(container_id, _state) do
@@ -1084,20 +1091,20 @@ defmodule FLAME.AppleContainers.Pool do
     end
   end
 
+  defp container_still_busy?(container_id, state) do
+    case Map.get(state.containers, container_id) do
+      %{state: :busy} -> true
+      _ -> false
+    end
+  end
+
   defp check_shutdown_completion(state) do
     case Map.get(state, :shutdown_info) do
       %{busy_containers: busy_containers, from: from, timeout_ref: timeout_ref} ->
         # Check if all busy containers have finished
-        still_busy =
-          busy_containers
-          |> Enum.filter(fn container_id ->
-            case Map.get(state.containers, container_id) do
-              %{state: :busy} -> true
-              _ -> false
-            end
-          end)
+        still_busy = Enum.filter(busy_containers, &container_still_busy?(&1, state))
 
-        if length(still_busy) == 0 do
+        if still_busy == [] do
           Logger.info("All busy containers have finished, proceeding with shutdown")
           :erlang.cancel_timer(timeout_ref)
           perform_immediate_shutdown(state)

@@ -265,7 +265,7 @@ defmodule FLAME.Security.RBAC do
         permission = "#{resource}:#{action}"
         user = session.user
 
-        authorized = is_authorized?(user, permission, context, state)
+        authorized = authorized?(user, permission, context, state)
 
         # Update session activity
         updated_session = put_in(session.last_activity, DateTime.utc_now())
@@ -429,7 +429,7 @@ defmodule FLAME.Security.RBAC do
     end
   end
 
-  defp is_authorized?(user, permission, context, state) do
+  defp authorized?(user, permission, context, state) do
     user_permissions = get_user_permissions_impl(user, state)
 
     # Check direct permission
@@ -495,17 +495,20 @@ defmodule FLAME.Security.RBAC do
 
   defp filter_sessions(sessions, filter) do
     Enum.filter(sessions, fn session ->
-      Enum.all?(filter, fn {key, value} ->
-        case key do
-          :active -> session.active == value
-          :user_id -> session.user_id == value
-          :created_after -> DateTime.compare(session.created_at, value) != :lt
-          :created_before -> DateTime.compare(session.created_at, value) != :gt
-          _ -> true
-        end
-      end)
+      Enum.all?(filter, &session_matches_filter?(session, &1))
     end)
   end
+
+  defp session_matches_filter?(session, {:active, value}), do: session.active == value
+  defp session_matches_filter?(session, {:user_id, value}), do: session.user_id == value
+
+  defp session_matches_filter?(session, {:created_after, value}),
+    do: DateTime.compare(session.created_at, value) != :lt
+
+  defp session_matches_filter?(session, {:created_before, value}),
+    do: DateTime.compare(session.created_at, value) != :gt
+
+  defp session_matches_filter?(_session, {_key, _value}), do: true
 
   defp generate_session_id do
     :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false)

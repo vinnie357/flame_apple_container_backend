@@ -14,7 +14,7 @@ defmodule FLAME.AlertManager do
   use GenServer
   require Logger
 
-  alias FLAME.{ContainerMetrics, ResourceManager, ClusterManager, SecurityManager}
+  alias FLAME.{ClusterManager, ContainerMetrics, ResourceManager, SecurityManager}
 
   defstruct [
     :alert_rules,
@@ -587,39 +587,44 @@ defmodule FLAME.AlertManager do
         :no_change
 
       value ->
-        condition_met =
-          case rule.condition do
-            :greater_than -> value > rule.threshold
-            :less_than -> value < rule.threshold
-            :equals -> value == rule.threshold
-            :not_equals -> value != rule.threshold
-          end
-
-        if condition_met do
-          # Check if condition has been met for the required duration
-          alert_id = generate_alert_id(rule)
-
-          case get_alert_state(alert_id) do
-            nil ->
-              # First time condition is met
-              store_alert_state(alert_id, %{
-                first_triggered: current_time,
-                last_checked: current_time,
-                value: value
-              })
-
-              :no_change
-          end
+        if check_threshold_condition(rule.condition, value, rule.threshold) do
+          handle_threshold_condition_met(rule, current_time, value)
         else
-          # Condition not met, clear any existing state
-          alert_id = generate_alert_id(rule)
-          clear_alert_state(alert_id)
-
-          # Check if there's an active alert to resolve
-          case find_active_alert_by_rule(rule) do
-            nil -> :no_change
-          end
+          handle_threshold_condition_not_met(rule)
         end
+    end
+  end
+
+  defp check_threshold_condition(:greater_than, value, threshold), do: value > threshold
+  defp check_threshold_condition(:less_than, value, threshold), do: value < threshold
+  defp check_threshold_condition(:equals, value, threshold), do: value == threshold
+  defp check_threshold_condition(:not_equals, value, threshold), do: value != threshold
+
+  defp handle_threshold_condition_met(rule, current_time, value) do
+    # Check if condition has been met for the required duration
+    alert_id = generate_alert_id(rule)
+
+    case get_alert_state(alert_id) do
+      nil ->
+        # First time condition is met
+        store_alert_state(alert_id, %{
+          first_triggered: current_time,
+          last_checked: current_time,
+          value: value
+        })
+
+        :no_change
+    end
+  end
+
+  defp handle_threshold_condition_not_met(rule) do
+    # Condition not met, clear any existing state
+    alert_id = generate_alert_id(rule)
+    clear_alert_state(alert_id)
+
+    # Check if there's an active alert to resolve
+    case find_active_alert_by_rule(rule) do
+      nil -> :no_change
     end
   end
 
@@ -629,11 +634,15 @@ defmodule FLAME.AlertManager do
         :no_change
 
       time_series ->
-        case detect_anomaly(time_series, rule.sensitivity) do
-          :normal ->
-            case find_active_alert_by_rule(rule) do
-              nil -> :no_change
-            end
+        evaluate_anomaly_result(rule, time_series)
+    end
+  end
+
+  defp evaluate_anomaly_result(rule, time_series) do
+    case detect_anomaly(time_series, rule.sensitivity) do
+      :normal ->
+        case find_active_alert_by_rule(rule) do
+          nil -> :no_change
         end
     end
   end
@@ -683,99 +692,85 @@ defmodule FLAME.AlertManager do
   end
 
   defp get_unhealthy_container_count do
-    try do
-      case GenServer.call(FLAME.ContainerHealth, :get_unhealthy_count, 5000) do
-        count when is_integer(count) -> count
-        _ -> 0
-      end
-    catch
+    case GenServer.call(FLAME.ContainerHealth, :get_unhealthy_count, 5000) do
+      count when is_integer(count) -> count
       _ -> 0
     end
+  catch
+    _ -> 0
   end
 
   defp get_memory_usage_percentage do
-    try do
-      case GenServer.call(ResourceManager, :get_resource_status, 5000) do
-        %{current_usage: usage, global_limits: limits} ->
-          usage.memory_gb / limits.max_total_memory_gb * 100
+    case GenServer.call(ResourceManager, :get_resource_status, 5000) do
+      %{current_usage: usage, global_limits: limits} ->
+        usage.memory_gb / limits.max_total_memory_gb * 100
 
-        _ ->
-          0
-      end
-    catch
-      _ -> 0
+      _ ->
+        0
     end
+  catch
+    _ -> 0
   end
 
   defp get_cpu_usage_percentage do
-    try do
-      case GenServer.call(ResourceManager, :get_resource_status, 5000) do
-        %{current_usage: usage, global_limits: limits} ->
-          usage.cpu_cores / limits.max_total_cpu_cores * 100
+    case GenServer.call(ResourceManager, :get_resource_status, 5000) do
+      %{current_usage: usage, global_limits: limits} ->
+        usage.cpu_cores / limits.max_total_cpu_cores * 100
 
-        _ ->
-          0
-      end
-    catch
-      _ -> 0
+      _ ->
+        0
     end
+  catch
+    _ -> 0
   end
 
   defp get_task_error_rate do
-    try do
-      case GenServer.call(ContainerMetrics, :get_metrics_summary, 5000) do
-        %{total_task_executions: total, total_errors: errors} when total > 0 ->
-          errors / total * 100
+    case GenServer.call(ContainerMetrics, :get_metrics_summary, 5000) do
+      %{total_task_executions: total, total_errors: errors} when total > 0 ->
+        errors / total * 100
 
-        _ ->
-          0
-      end
-    catch
-      _ -> 0
+      _ ->
+        0
     end
+  catch
+    _ -> 0
   end
 
   defp get_average_task_execution_time do
-    try do
-      case GenServer.call(ContainerMetrics, :get_metrics_summary, 5000) do
-        %{average_execution_time: time} when is_number(time) -> time
-        _ -> 0
-      end
-    catch
+    case GenServer.call(ContainerMetrics, :get_metrics_summary, 5000) do
+      %{average_execution_time: time} when is_number(time) -> time
       _ -> 0
     end
+  catch
+    _ -> 0
   end
 
   defp get_cluster_health_percentage do
-    try do
-      case GenServer.call(ClusterManager, :get_cluster_status, 5000) do
-        clusters when is_list(clusters) ->
-          total_clusters = length(clusters)
-          healthy_clusters = Enum.count(clusters, &(&1.status == :healthy))
+    case GenServer.call(ClusterManager, :get_cluster_status, 5000) do
+      clusters when is_list(clusters) ->
+        total_clusters = length(clusters)
+        healthy_clusters = Enum.count(clusters, &(&1.status == :healthy))
 
-          if total_clusters > 0 do
-            healthy_clusters / total_clusters * 100
-          else
-            100
-          end
-
-        _ ->
+        if total_clusters > 0 do
+          healthy_clusters / total_clusters * 100
+        else
           100
-      end
-    catch
-      _ -> 100
+        end
+
+      _ ->
+        100
     end
+  catch
+    _ -> 100
   end
 
   defp get_security_failures_count do
-    try do
-      case GenServer.call(SecurityManager, :get_security_metrics, 5000) do
-        %{validation_failures: failures} when is_integer(failures) -> failures
-        _ -> 0
-      end
-    catch
+    case GenServer.call(SecurityManager, :get_security_metrics, 5000) do
+      %{validation_failures: failures} when is_integer(failures) -> failures
       _ -> 0
     end
+  catch
+    _ -> 0
   end
 
   defp process_new_alert(alert, state) do
@@ -814,16 +809,18 @@ defmodule FLAME.AlertManager do
     channels = select_notification_channels(alert, state)
 
     Enum.each(channels, fn channel ->
-      spawn(fn ->
-        case send_notification(channel, alert) do
-          :ok ->
-            Logger.info("Alert notification sent to #{channel.name}")
-
-          {:error, reason} ->
-            Logger.error("Failed to send alert notification to #{channel.name}: #{reason}")
-        end
-      end)
+      spawn(fn -> send_and_log_notification(channel, alert) end)
     end)
+  end
+
+  defp send_and_log_notification(channel, alert) do
+    case send_notification(channel, alert) do
+      :ok ->
+        Logger.info("Alert notification sent to #{channel.name}")
+
+      {:error, reason} ->
+        Logger.error("Failed to send alert notification to #{channel.name}: #{reason}")
+    end
   end
 
   defp send_notification(channel, alert) do
@@ -1059,27 +1056,32 @@ defmodule FLAME.AlertManager do
 
   defp should_suppress_alert(alert, state) do
     Enum.any?(state.suppression_rules, fn rule ->
-      case rule.type do
-        :duplicate ->
-          window_ms = rule.window_minutes * 60_000
-          now = System.system_time(:millisecond)
-
-          Enum.any?(state.active_alerts, fn {_id, existing} ->
-            fields_match =
-              Enum.all?(rule.match_fields, fn field ->
-                Map.get(alert, field) == Map.get(existing, field)
-              end)
-
-            fields_match and now - existing.triggered_at < window_ms
-          end)
-
-        :conditional ->
-          rule.condition.(alert)
-
-        _ ->
-          false
-      end
+      check_suppression_rule(rule, alert, state)
     end)
+  end
+
+  defp check_suppression_rule(%{type: :duplicate} = rule, alert, state) do
+    window_ms = rule.window_minutes * 60_000
+    now = System.system_time(:millisecond)
+
+    Enum.any?(state.active_alerts, fn {_id, existing} ->
+      duplicate_alert_match?(rule, alert, existing, now, window_ms)
+    end)
+  end
+
+  defp check_suppression_rule(%{type: :conditional} = rule, alert, _state) do
+    rule.condition.(alert)
+  end
+
+  defp check_suppression_rule(_rule, _alert, _state), do: false
+
+  defp duplicate_alert_match?(rule, alert, existing, now, window_ms) do
+    fields_match =
+      Enum.all?(rule.match_fields, fn field ->
+        Map.get(alert, field) == Map.get(existing, field)
+      end)
+
+    fields_match and now - existing.triggered_at < window_ms
   end
 
   defp find_duplicate_active_alert(alert, state) do
@@ -1118,15 +1120,19 @@ defmodule FLAME.AlertManager do
 
     if policy do
       Enum.each(policy.rules, fn rule ->
-        delay_ms = rule.delay_minutes * 60_000
-
-        if delay_ms > 0 do
-          Process.send_after(self(), {:escalate_alert, alert.id}, delay_ms)
-        end
+        schedule_escalation_rule(alert, rule)
       end)
     end
 
     :ok
+  end
+
+  defp schedule_escalation_rule(alert, rule) do
+    delay_ms = rule.delay_minutes * 60_000
+
+    if delay_ms > 0 do
+      Process.send_after(self(), {:escalate_alert, alert.id}, delay_ms)
+    end
   end
 
   defp get_alert_state(alert_id) do
@@ -1253,16 +1259,14 @@ defmodule FLAME.AlertManager do
   end
 
   defp get_metric_time_series(metric, window_seconds) do
-    try do
-      case GenServer.call(ContainerMetrics, {:get_time_series, metric, window_seconds}, 5000) do
-        series when is_list(series) and length(series) > 0 -> series
-        _ -> nil
-      end
-    catch
-      _ ->
-        Logger.debug("ContainerMetrics unavailable for time series query on #{metric}")
-        nil
+    case GenServer.call(ContainerMetrics, {:get_time_series, metric, window_seconds}, 5000) do
+      series when is_list(series) and length(series) > 0 -> series
+      _ -> nil
     end
+  catch
+    _ ->
+      Logger.debug("ContainerMetrics unavailable for time series query on #{metric}")
+      nil
   end
 
   defp detect_anomaly(time_series, sensitivity) do
@@ -1292,27 +1296,20 @@ defmodule FLAME.AlertManager do
     end
   end
 
-  defp evaluate_condition(condition, _current_time) do
-    case condition do
-      %{metric: metric, condition: op, threshold: threshold} ->
-        case get_metric_value(metric) do
-          nil ->
-            false
-
-          value ->
-            case op do
-              :greater_than -> value > threshold
-              :less_than -> value < threshold
-              :equals -> value == threshold
-              :not_equals -> value != threshold
-              _ -> false
-            end
-        end
-
-      _ ->
-        false
+  defp evaluate_condition(%{metric: metric, condition: op, threshold: threshold}, _current_time) do
+    case get_metric_value(metric) do
+      nil -> false
+      value -> compare_metric_value(op, value, threshold)
     end
   end
+
+  defp evaluate_condition(_condition, _current_time), do: false
+
+  defp compare_metric_value(:greater_than, value, threshold), do: value > threshold
+  defp compare_metric_value(:less_than, value, threshold), do: value < threshold
+  defp compare_metric_value(:equals, value, threshold), do: value == threshold
+  defp compare_metric_value(:not_equals, value, threshold), do: value != threshold
+  defp compare_metric_value(_op, _value, _threshold), do: false
 
   defp process_telemetry_event(event_name, measurements, metadata, state) do
     case event_name do
