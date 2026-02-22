@@ -12,6 +12,8 @@ defmodule FLAME.ResourceManager do
   use GenServer
   require Logger
 
+  alias FLAME.AppleContainers.CLI
+
   defstruct [
     :resource_config,
     :container_resources,
@@ -255,9 +257,7 @@ defmodule FLAME.ResourceManager do
     # This would integrate with actual container monitoring
     # For now, return mock data
     # Try to get actual container stats
-    case System.cmd("container", ["stats", container_id, "--format", "json"],
-           stderr_to_stdout: true
-         ) do
+    case CLI.adapter().get_container_stats(container_id, ["--format", "json"]) do
       {output, 0} ->
         parse_container_stats(output)
 
@@ -358,7 +358,7 @@ defmodule FLAME.ResourceManager do
     Logger.info("Enforcing memory limit #{limit_mb}MB for container #{container_id}")
 
     # Example: update container memory limit
-    case System.cmd("container", ["update", "--memory", "#{limit_mb}m", container_id]) do
+    case CLI.adapter().update_container(["--memory", "#{limit_mb}m", container_id]) do
       {_, 0} ->
         Logger.info("Successfully updated memory limit for #{container_id}")
         :ok
@@ -373,7 +373,7 @@ defmodule FLAME.ResourceManager do
     Logger.info("Enforcing CPU limit #{limit_percent}% for container #{container_id}")
 
     # Example: update container CPU limit
-    case System.cmd("container", ["update", "--cpus", "#{limit_percent / 100}", container_id]) do
+    case CLI.adapter().update_container(["--cpus", "#{limit_percent / 100}", container_id]) do
       {_, 0} ->
         Logger.info("Successfully updated CPU limit for #{container_id}")
         :ok

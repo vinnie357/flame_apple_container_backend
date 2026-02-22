@@ -9,6 +9,7 @@ defmodule FLAME.ContainerPool do
   use GenServer
   require Logger
 
+  alias FLAME.AppleContainers.CLI
   alias FLAME.ContainerHealth
   alias FLAME.ContainerMetrics
 
@@ -394,7 +395,7 @@ defmodule FLAME.ContainerPool do
         "--rm"
       ] ++ env_vars ++ [config.image]
 
-    case System.cmd("container", tl(cmd)) do
+    case CLI.adapter().run_container(tl(cmd)) do
       {output, 0} ->
         Logger.info("Started container #{container_name}")
         {:ok, String.trim(output)}
@@ -412,7 +413,7 @@ defmodule FLAME.ContainerPool do
   end
 
   defp check_epmd_readiness(container_name) do
-    case System.cmd("container", ["exec", container_name, "epmd", "-names"]) do
+    case CLI.adapter().exec_in_container(container_name, ["epmd", "-names"]) do
       {output, 0} ->
         if String.contains?(output, "name "), do: :ready, else: :not_ready
 
@@ -453,7 +454,7 @@ defmodule FLAME.ContainerPool do
   end
 
   defp cleanup_container(container_name) do
-    case System.cmd("container", ["stop", container_name]) do
+    case CLI.adapter().stop_container(container_name) do
       {_, 0} -> :ok
       _ -> :error
     end

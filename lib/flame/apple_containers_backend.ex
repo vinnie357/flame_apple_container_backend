@@ -14,6 +14,7 @@ defmodule FLAME.AppleContainersBackend do
 
   require Logger
 
+  alias FLAME.AppleContainers.CLI
   alias FLAME.CircuitBreaker
   alias FLAME.ContainerMetrics
   alias FLAME.ContainerPool
@@ -211,7 +212,7 @@ defmodule FLAME.AppleContainersBackend do
 
   defp validate_dns_domain_against_system(requested_domain) do
     # Get available DNS domains from Apple Containers
-    case System.cmd("container", ["system", "dns", "list"]) do
+    case CLI.adapter().list_dns_domains() do
       {output, 0} ->
         available_domains =
           output
@@ -264,7 +265,7 @@ defmodule FLAME.AppleContainersBackend do
     Logger.error("No DNS domains available in Apple Containers system")
 
     # Try to get the default domain
-    case System.cmd("container", ["system", "dns", "default", "get"]) do
+    case CLI.adapter().get_default_dns_domain() do
       {default_domain, 0} when default_domain != "" ->
         trimmed_default = String.trim(default_domain)
         Logger.warning("Using default DNS domain: #{trimmed_default}")
@@ -412,7 +413,7 @@ defmodule FLAME.AppleContainersBackend do
 
     Logger.debug("Starting container with command: #{inspect(cmd)}")
 
-    case System.cmd(hd(cmd), tl(cmd), stderr_to_stdout: true) do
+    case CLI.adapter().run_container(tl(cmd)) do
       {output, 0} ->
         handle_container_start_success(container_name, output)
 
@@ -525,7 +526,7 @@ defmodule FLAME.AppleContainersBackend do
   end
 
   defp check_container_exists(container_name) do
-    case System.cmd("container", ["inspect", container_name], stderr_to_stdout: true) do
+    case CLI.adapter().inspect_container(container_name) do
       {_output, 0} -> {:ok, :exists}
       {_output, 1} -> {:ok, :not_exists}
       {error, code} -> {:error, {:inspect_failed, code, error}}
@@ -533,7 +534,7 @@ defmodule FLAME.AppleContainersBackend do
   end
 
   defp verify_container_running(container_name) do
-    case System.cmd("container", ["inspect", container_name], stderr_to_stdout: true) do
+    case CLI.adapter().inspect_container(container_name) do
       {output, 0} when is_binary(output) ->
         # Simple check - if inspect succeeds, container exists and is likely running
         {:ok, :running}
@@ -551,7 +552,7 @@ defmodule FLAME.AppleContainersBackend do
 
     check_readiness = fn ->
       # Simple readiness check - just verify container is responsive
-      case System.cmd("container", ["exec", container_name, "elixir", "--version"]) do
+      case CLI.adapter().exec_in_container(container_name, ["elixir", "--version"]) do
         {_output, 0} -> :ready
         _ -> :not_ready
       end
@@ -628,7 +629,7 @@ defmodule FLAME.AppleContainersBackend do
   end
 
   defp get_local_hostname do
-    case System.cmd("hostname", []) do
+    case CLI.adapter().hostname() do
       {hostname, 0} ->
         String.trim(hostname)
 
@@ -696,7 +697,7 @@ defmodule FLAME.AppleContainersBackend do
     Logger.info("Cleaning up container #{container_name}")
 
     # First try to stop gracefully
-    case System.cmd("container", ["stop", container_name, "--time", "10"], stderr_to_stdout: true) do
+    case CLI.adapter().stop_container(container_name, time: 10) do
       {_output, 0} ->
         Logger.info("Container #{container_name} stopped gracefully")
         :ok
@@ -707,7 +708,7 @@ defmodule FLAME.AppleContainersBackend do
         )
 
         # If graceful stop fails, try force kill
-        case System.cmd("container", ["kill", container_name], stderr_to_stdout: true) do
+        case CLI.adapter().kill_container(container_name) do
           {_output, 0} ->
             Logger.info("Container #{container_name} force killed")
             :ok
@@ -856,9 +857,7 @@ defmodule FLAME.AppleContainersBackend do
       File.chmod!(script_path, 0o755)
 
       # Execute script in container
-      case System.cmd("container", ["exec", container_name, "sh", script_path],
-             stderr_to_stdout: true
-           ) do
+      case CLI.adapter().exec_in_container(container_name, ["sh", script_path]) do
         {output, 0} ->
           Logger.info("Container execution completed successfully")
           Logger.debug("Container output: #{output}")
@@ -923,7 +922,7 @@ defmodule FLAME.AppleContainersBackend do
   # Resource monitoring functions
 
   def get_container_stats(container_name) do
-    case System.cmd("container", ["stats", container_name, "--no-stream"], stderr_to_stdout: true) do
+    case CLI.adapter().get_container_stats(container_name, ["--no-stream"]) do
       {output, 0} ->
         try do
           stats = Jason.decode!(output)
