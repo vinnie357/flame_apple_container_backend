@@ -44,91 +44,94 @@ defmodule FLAME.AlertManager do
   ## Public API
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
   Add a new alert rule.
   """
-  def add_alert_rule(rule) do
-    GenServer.call(__MODULE__, {:add_alert_rule, rule})
+  def add_alert_rule(rule, server \\ __MODULE__) do
+    GenServer.call(server, {:add_alert_rule, rule})
   end
 
   @doc """
   Remove an alert rule.
   """
-  def remove_alert_rule(rule_id) do
-    GenServer.call(__MODULE__, {:remove_alert_rule, rule_id})
+  def remove_alert_rule(rule_id, server \\ __MODULE__) do
+    GenServer.call(server, {:remove_alert_rule, rule_id})
   end
 
   @doc """
   Add a notification channel.
   """
-  def add_notification_channel(channel) do
-    GenServer.call(__MODULE__, {:add_notification_channel, channel})
+  def add_notification_channel(channel, server \\ __MODULE__) do
+    GenServer.call(server, {:add_notification_channel, channel})
   end
 
   @doc """
   Get all active alerts.
   """
-  def get_active_alerts do
-    GenServer.call(__MODULE__, :get_active_alerts)
+  def get_active_alerts(server \\ __MODULE__) do
+    GenServer.call(server, :get_active_alerts)
   end
 
   @doc """
   Acknowledge an alert.
   """
-  def acknowledge_alert(alert_id, user_id, notes \\ "") do
-    GenServer.call(__MODULE__, {:acknowledge_alert, alert_id, user_id, notes})
+  def acknowledge_alert(alert_id, user_id, notes \\ "", server \\ __MODULE__) do
+    GenServer.call(server, {:acknowledge_alert, alert_id, user_id, notes})
   end
 
   @doc """
   Resolve an alert.
   """
-  def resolve_alert(alert_id, user_id, resolution_notes \\ "") do
-    GenServer.call(__MODULE__, {:resolve_alert, alert_id, user_id, resolution_notes})
+  def resolve_alert(alert_id, user_id, resolution_notes \\ "", server \\ __MODULE__) do
+    GenServer.call(server, {:resolve_alert, alert_id, user_id, resolution_notes})
   end
 
   @doc """
   Trigger a manual alert.
   """
-  def trigger_manual_alert(alert_data) do
-    GenServer.cast(__MODULE__, {:trigger_manual_alert, alert_data})
+  def trigger_manual_alert(alert_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:trigger_manual_alert, alert_data})
   end
 
   @doc """
   Create a new alert from provided alert data.
   """
-  def create_alert(alert_data) do
-    GenServer.cast(__MODULE__, {:create_alert, alert_data})
+  def create_alert(alert_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:create_alert, alert_data})
   end
 
   @doc """
   Get alert statistics and metrics.
   """
-  def get_alert_metrics do
-    GenServer.call(__MODULE__, :get_alert_metrics)
+  def get_alert_metrics(server \\ __MODULE__) do
+    GenServer.call(server, :get_alert_metrics)
   end
 
   @doc """
   Test a notification channel.
   """
-  def test_notification_channel(channel_id) do
-    GenServer.call(__MODULE__, {:test_notification_channel, channel_id})
+  def test_notification_channel(channel_id, server \\ __MODULE__) do
+    GenServer.call(server, {:test_notification_channel, channel_id})
   end
 
   ## GenServer Callbacks
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     state = %__MODULE__{
       alert_rules: initialize_default_alert_rules(),
-      notification_channels: initialize_notification_channels(opts),
-      escalation_policies: initialize_escalation_policies(opts),
+      notification_channels: initialize_notification_channels(clean_opts),
+      escalation_policies: initialize_escalation_policies(clean_opts),
       active_alerts: %{},
       alert_history: [],
       suppression_rules: initialize_suppression_rules(),
       anomaly_detector: initialize_anomaly_detector(),
-      on_call_schedule: initialize_on_call_schedule(opts)
+      on_call_schedule: initialize_on_call_schedule(clean_opts)
     }
 
     # Start periodic alert evaluation

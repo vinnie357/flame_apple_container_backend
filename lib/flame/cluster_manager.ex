@@ -40,7 +40,8 @@ defmodule FLAME.ClusterManager do
   ## Public API
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
@@ -54,51 +55,51 @@ defmodule FLAME.ClusterManager do
   - {:ok, cluster_info} on successful registration
   - {:error, reason} on failure
   """
-  def register_cluster(cluster_id, config) do
-    GenServer.call(__MODULE__, {:register_cluster, cluster_id, config})
+  def register_cluster(cluster_id, config, server \\ __MODULE__) do
+    GenServer.call(server, {:register_cluster, cluster_id, config})
   end
 
   @doc """
   Unregister a cluster from the multi-cluster environment.
   """
-  def unregister_cluster(cluster_id) do
-    GenServer.call(__MODULE__, {:unregister_cluster, cluster_id})
+  def unregister_cluster(cluster_id, server \\ __MODULE__) do
+    GenServer.call(server, {:unregister_cluster, cluster_id})
   end
 
   @doc """
   Get the status of all registered clusters.
   """
-  def get_cluster_status do
-    GenServer.call(__MODULE__, :get_cluster_status)
+  def get_cluster_status(server \\ __MODULE__) do
+    GenServer.call(server, :get_cluster_status)
   end
 
   @doc """
   Select the best cluster for task execution based on load balancing strategy.
   """
-  def select_cluster_for_task(task_requirements \\ %{}) do
-    GenServer.call(__MODULE__, {:select_cluster, task_requirements})
+  def select_cluster_for_task(task_requirements \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:select_cluster, task_requirements})
   end
 
   @doc """
   Trigger manual failover from one cluster to another.
   """
-  def trigger_failover(from_cluster, to_cluster, reason \\ "manual") do
-    GenServer.call(__MODULE__, {:trigger_failover, from_cluster, to_cluster, reason})
+  def trigger_failover(from_cluster, to_cluster, reason \\ "manual", server \\ __MODULE__) do
+    GenServer.call(server, {:trigger_failover, from_cluster, to_cluster, reason})
   end
 
   @doc """
   Get aggregated metrics across all clusters.
   """
-  def get_aggregated_metrics do
-    GenServer.call(__MODULE__, :get_aggregated_metrics)
+  def get_aggregated_metrics(server \\ __MODULE__) do
+    GenServer.call(server, :get_aggregated_metrics)
   end
 
   @doc """
   Execute a task with automatic cluster selection and failover.
   """
-  def execute_task_with_failover(task_function, options \\ %{}) do
+  def execute_task_with_failover(task_function, options \\ %{}, server \\ __MODULE__) do
     GenServer.call(
-      __MODULE__,
+      server,
       {:execute_task_with_failover, task_function, options},
       @failover_timeout
     )
@@ -107,13 +108,17 @@ defmodule FLAME.ClusterManager do
   ## GenServer Callbacks
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     cluster_config = %{
-      local_cluster_id: Keyword.get(opts, :cluster_id, generate_cluster_id()),
-      discovery_method: Keyword.get(opts, :discovery_method, :static),
-      load_balancing_strategy: Keyword.get(opts, :load_balancing_strategy, :round_robin),
-      failover_enabled: Keyword.get(opts, :failover_enabled, true),
-      health_check_interval: Keyword.get(opts, :health_check_interval, @health_check_interval),
-      cluster_sync_interval: Keyword.get(opts, :cluster_sync_interval, @cluster_sync_interval)
+      local_cluster_id: Keyword.get(clean_opts, :cluster_id, generate_cluster_id()),
+      discovery_method: Keyword.get(clean_opts, :discovery_method, :static),
+      load_balancing_strategy: Keyword.get(clean_opts, :load_balancing_strategy, :round_robin),
+      failover_enabled: Keyword.get(clean_opts, :failover_enabled, true),
+      health_check_interval:
+        Keyword.get(clean_opts, :health_check_interval, @health_check_interval),
+      cluster_sync_interval:
+        Keyword.get(clean_opts, :cluster_sync_interval, @cluster_sync_interval)
     }
 
     state = %__MODULE__{
@@ -122,10 +127,10 @@ defmodule FLAME.ClusterManager do
       cluster_config: cluster_config,
       health_checks: %{},
       load_balancer: initialize_load_balancer(cluster_config.load_balancing_strategy),
-      failover_policies: initialize_failover_policies(opts),
+      failover_policies: initialize_failover_policies(clean_opts),
       metrics_aggregator: initialize_metrics_aggregator(),
-      failover_callback: Keyword.get(opts, :failover_callback),
-      http_client: Keyword.get(opts, :http_client, &http_get/2)
+      failover_callback: Keyword.get(clean_opts, :failover_callback),
+      http_client: Keyword.get(clean_opts, :http_client, &http_get/2)
     }
 
     # Register local cluster

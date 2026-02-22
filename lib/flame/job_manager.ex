@@ -58,96 +58,99 @@ defmodule FLAME.JobManager do
   ## Public API
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
   Submit a job for execution.
   """
-  def submit_job(job_spec, options \\ %{}) do
-    GenServer.call(__MODULE__, {:submit_job, job_spec, options})
+  def submit_job(job_spec, options \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:submit_job, job_spec, options})
   end
 
   @doc """
   Submit a workflow for execution.
   """
-  def submit_workflow(workflow_spec, options \\ %{}) do
-    GenServer.call(__MODULE__, {:submit_workflow, workflow_spec, options})
+  def submit_workflow(workflow_spec, options \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:submit_workflow, workflow_spec, options})
   end
 
   @doc """
   Get job status and details.
   """
-  def get_job_status(job_id) do
-    GenServer.call(__MODULE__, {:get_job_status, job_id})
+  def get_job_status(job_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_job_status, job_id})
   end
 
   @doc """
   Cancel a pending or running job.
   """
-  def cancel_job(job_id, reason \\ "user_cancelled") do
-    GenServer.call(__MODULE__, {:cancel_job, job_id, reason})
+  def cancel_job(job_id, reason \\ "user_cancelled", server \\ __MODULE__) do
+    GenServer.call(server, {:cancel_job, job_id, reason})
   end
 
   @doc """
   List jobs with optional filtering.
   """
-  def list_jobs(filters \\ %{}) do
-    GenServer.call(__MODULE__, {:list_jobs, filters})
+  def list_jobs(filters \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:list_jobs, filters})
   end
 
   @doc """
   Get workflow status and execution details.
   """
-  def get_workflow_status(workflow_id) do
-    GenServer.call(__MODULE__, {:get_workflow_status, workflow_id})
+  def get_workflow_status(workflow_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_workflow_status, workflow_id})
   end
 
   @doc """
   Schedule a recurring job using cron syntax.
   """
-  def schedule_job(cron_expression, job_spec, options \\ %{}) do
-    GenServer.call(__MODULE__, {:schedule_job, cron_expression, job_spec, options})
+  def schedule_job(cron_expression, job_spec, options \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:schedule_job, cron_expression, job_spec, options})
   end
 
   @doc """
   Unschedule a recurring job.
   """
-  def unschedule_job(schedule_id) do
-    GenServer.call(__MODULE__, {:unschedule_job, schedule_id})
+  def unschedule_job(schedule_id, server \\ __MODULE__) do
+    GenServer.call(server, {:unschedule_job, schedule_id})
   end
 
   @doc """
   Get job execution metrics and statistics.
   """
-  def get_job_metrics do
-    GenServer.call(__MODULE__, :get_job_metrics)
+  def get_job_metrics(server \\ __MODULE__) do
+    GenServer.call(server, :get_job_metrics)
   end
 
   @doc """
   Create a job template for reuse.
   """
-  def create_job_template(template_spec) do
-    GenServer.call(__MODULE__, {:create_job_template, template_spec})
+  def create_job_template(template_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:create_job_template, template_spec})
   end
 
   @doc """
   Execute a job from a template.
   """
-  def execute_template(template_id, parameters \\ %{}) do
-    GenServer.call(__MODULE__, {:execute_template, template_id, parameters})
+  def execute_template(template_id, parameters \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:execute_template, template_id, parameters})
   end
 
   ## GenServer Callbacks
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     state = %__MODULE__{
       job_queues: initialize_job_queues(),
       active_jobs: %{},
       workflows: %{},
       job_history: [],
       schedulers: %{},
-      retry_policies: initialize_retry_policies(opts),
+      retry_policies: initialize_retry_policies(clean_opts),
       dead_letter_queue: :queue.new(),
       job_templates: %{}
     }
@@ -158,7 +161,7 @@ defmodule FLAME.JobManager do
     schedule_metrics_collection()
 
     # Initialize scheduled jobs from configuration
-    state = load_scheduled_jobs(state, opts)
+    state = load_scheduled_jobs(state, clean_opts)
 
     Logger.info("JobManager initialized with #{map_size(state.job_queues)} job queues")
 

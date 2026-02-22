@@ -42,11 +42,13 @@ defmodule FLAME.Orchestrator do
   }
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    config = Keyword.get(opts, :config, %{}) |> merge_default_config()
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    config = Keyword.get(clean_opts, :config, %{}) |> merge_default_config()
 
     state = %__MODULE__{
       cluster_config: config,
@@ -61,28 +63,28 @@ defmodule FLAME.Orchestrator do
     {:ok, state}
   end
 
-  def create_cluster(cluster_spec) do
-    GenServer.call(__MODULE__, {:create_cluster, cluster_spec})
+  def create_cluster(cluster_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:create_cluster, cluster_spec})
   end
 
-  def destroy_cluster(cluster_id) do
-    GenServer.call(__MODULE__, {:destroy_cluster, cluster_id})
+  def destroy_cluster(cluster_id, server \\ __MODULE__) do
+    GenServer.call(server, {:destroy_cluster, cluster_id})
   end
 
-  def schedule_task(task_spec) do
-    GenServer.call(__MODULE__, {:schedule_task, task_spec})
+  def schedule_task(task_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:schedule_task, task_spec})
   end
 
-  def schedule_workflow(workflow_spec) do
-    GenServer.call(__MODULE__, {:schedule_workflow, workflow_spec})
+  def schedule_workflow(workflow_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:schedule_workflow, workflow_spec})
   end
 
-  def get_cluster_status(cluster_id \\ nil) do
-    GenServer.call(__MODULE__, {:get_cluster_status, cluster_id})
+  def get_cluster_status(cluster_id \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:get_cluster_status, cluster_id})
   end
 
-  def update_affinity_rules(rules) do
-    GenServer.cast(__MODULE__, {:update_affinity_rules, rules})
+  def update_affinity_rules(rules, server \\ __MODULE__) do
+    GenServer.cast(server, {:update_affinity_rules, rules})
   end
 
   # GenServer callbacks
