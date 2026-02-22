@@ -190,9 +190,8 @@ defmodule FLAME.AppleContainers.Config do
     with :ok <- validate_required_keys(config),
          :ok <- validate_pool_configuration(config),
          :ok <- validate_resource_limits(config),
-         :ok <- validate_timeouts(config),
-         :ok <- validate_thresholds(config) do
-      :ok
+         :ok <- validate_timeouts(config) do
+      validate_thresholds(config)
     end
   end
 
@@ -514,29 +513,39 @@ defmodule FLAME.AppleContainers.Config do
   defp validate_thresholds(config) do
     case config.alert_thresholds do
       thresholds when is_map(thresholds) ->
-        # Validate that numeric thresholds are reasonable
-        invalid_thresholds =
-          Enum.filter(thresholds, fn {key, value} ->
-            case {key, value} do
-              {:cpu_usage, val} when is_number(val) and val >= 0 and val <= 100 -> false
-              {:memory_usage, val} when is_number(val) and val >= 0 and val <= 100 -> false
-              {:error_rate, val} when is_number(val) and val >= 0 and val <= 100 -> false
-              {:response_time, val} when is_number(val) and val > 0 -> false
-              {:unhealthy_containers, val} when is_number(val) and val >= 0 and val <= 1 -> false
-              _ -> true
-            end
-          end)
-
-        case invalid_thresholds do
-          [] ->
-            :ok
-
-          thresholds ->
-            {:error, {:invalid_thresholds, "Invalid threshold values: #{inspect(thresholds)}"}}
-        end
+        validate_threshold_values(thresholds)
 
       _ ->
         {:error, {:invalid_thresholds, "alert_thresholds must be a map"}}
     end
   end
+
+  defp validate_threshold_values(thresholds) do
+    invalid_thresholds = Enum.filter(thresholds, &invalid_threshold?/1)
+
+    case invalid_thresholds do
+      [] ->
+        :ok
+
+      invalid ->
+        {:error, {:invalid_thresholds, "Invalid threshold values: #{inspect(invalid)}"}}
+    end
+  end
+
+  defp invalid_threshold?({:cpu_usage, val}) when is_number(val) and val >= 0 and val <= 100,
+    do: false
+
+  defp invalid_threshold?({:memory_usage, val}) when is_number(val) and val >= 0 and val <= 100,
+    do: false
+
+  defp invalid_threshold?({:error_rate, val}) when is_number(val) and val >= 0 and val <= 100,
+    do: false
+
+  defp invalid_threshold?({:response_time, val}) when is_number(val) and val > 0, do: false
+
+  defp invalid_threshold?({:unhealthy_containers, val})
+       when is_number(val) and val >= 0 and val <= 1,
+       do: false
+
+  defp invalid_threshold?(_), do: true
 end

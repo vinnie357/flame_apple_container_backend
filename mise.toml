@@ -3,7 +3,7 @@ _.file = ".env"
 
 [tools]
 erlang = "27"
-elixir = "1.18"
+elixir = "1.19.5-otp-27"
 
 [tasks.deps]
 description = "Install dependencies"
@@ -17,7 +17,7 @@ depends = ["deps"]
 [tasks.test]
 description = "Run tests"
 run = "mix test"
-depends = ["deps"]
+depends = ["compile"]
 
 [tasks.format]
 description = "Format code"

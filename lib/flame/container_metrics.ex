@@ -206,18 +206,16 @@ defmodule FLAME.ContainerMetrics do
 
   # Telemetry handler (must be public for telemetry)
   def handle_telemetry_event(event_name, measurements, metadata, _config) do
-    try do
-      case Process.whereis(__MODULE__) do
-        nil ->
-          # Process not running, ignore telemetry event
-          :ok
+    case Process.whereis(__MODULE__) do
+      nil ->
+        # Process not running, ignore telemetry event
+        :ok
 
-        pid when is_pid(pid) ->
-          send(pid, {:telemetry_event, event_name, measurements, metadata})
-      end
-    rescue
-      _ -> :ok
+      pid when is_pid(pid) ->
+        send(pid, {:telemetry_event, event_name, measurements, metadata})
     end
+  rescue
+    _ -> :ok
   end
 
   # Private functions
@@ -284,78 +282,102 @@ defmodule FLAME.ContainerMetrics do
   defp update_metrics_store(store, event_name, measurements, metadata) do
     case event_name do
       [:flame, :container, :provision] ->
-        container_id = metadata.container_id
-        container_metrics = Map.get(store, container_id, %{})
-
-        updated_metrics =
-          Map.merge(container_metrics, %{
-            provisioned_at: metadata.timestamp,
-            provision_count: Map.get(container_metrics, :provision_count, 0) + 1
-          })
-
-        Map.put(store, container_id, updated_metrics)
+        update_container_provision_metrics(store, metadata)
 
       [:flame, :container, :checkout] ->
-        container_id = metadata.container_id
-        container_metrics = Map.get(store, container_id, %{})
-
-        updated_metrics =
-          Map.merge(container_metrics, %{
-            last_checkout: metadata.timestamp,
-            checkout_count: Map.get(container_metrics, :checkout_count, 0) + 1
-          })
-
-        Map.put(store, container_id, updated_metrics)
+        update_container_checkout_metrics(store, metadata)
 
       [:flame, :container, :return] ->
-        container_id = metadata.container_id
-        container_metrics = Map.get(store, container_id, %{})
-
-        updated_metrics =
-          Map.merge(container_metrics, %{
-            last_return: metadata.timestamp,
-            return_count: Map.get(container_metrics, :return_count, 0) + 1
-          })
-
-        Map.put(store, container_id, updated_metrics)
+        update_container_return_metrics(store, metadata)
 
       [:flame, :container, :terminate] ->
-        container_id = metadata.container_id
-        container_metrics = Map.get(store, container_id, %{})
-
-        updated_metrics =
-          Map.merge(container_metrics, %{
-            terminated_at: metadata.timestamp,
-            termination_reason: metadata.reason
-          })
-
-        Map.put(store, container_id, updated_metrics)
+        update_container_terminate_metrics(store, metadata)
 
       [:flame, :task, :execute] ->
-        task_metrics = Map.get(store, :tasks, %{})
-
-        execution_time =
-          if is_number(measurements.execution_time), do: measurements.execution_time, else: 0
-
-        updated_metrics = %{
-          total_executions: Map.get(task_metrics, :total_executions, 0) + 1,
-          total_execution_time: Map.get(task_metrics, :total_execution_time, 0) + execution_time,
-          last_execution: metadata.timestamp
-        }
-
-        Map.put(store, :tasks, updated_metrics)
+        update_task_execution_metrics(store, measurements, metadata)
 
       [:flame, :pool, :status] ->
-        Map.put(store, :pool_status, %{
-          warm_pool_size: measurements.warm_pool_size || 0,
-          active_containers: measurements.active_containers || 0,
-          total_containers: measurements.total_containers || 0,
-          last_updated: metadata.timestamp
-        })
+        update_pool_status_metrics(store, measurements, metadata)
 
       _ ->
         store
     end
+  end
+
+  defp update_container_provision_metrics(store, metadata) do
+    container_id = metadata.container_id
+    container_metrics = Map.get(store, container_id, %{})
+
+    updated_metrics =
+      Map.merge(container_metrics, %{
+        provisioned_at: metadata.timestamp,
+        provision_count: Map.get(container_metrics, :provision_count, 0) + 1
+      })
+
+    Map.put(store, container_id, updated_metrics)
+  end
+
+  defp update_container_checkout_metrics(store, metadata) do
+    container_id = metadata.container_id
+    container_metrics = Map.get(store, container_id, %{})
+
+    updated_metrics =
+      Map.merge(container_metrics, %{
+        last_checkout: metadata.timestamp,
+        checkout_count: Map.get(container_metrics, :checkout_count, 0) + 1
+      })
+
+    Map.put(store, container_id, updated_metrics)
+  end
+
+  defp update_container_return_metrics(store, metadata) do
+    container_id = metadata.container_id
+    container_metrics = Map.get(store, container_id, %{})
+
+    updated_metrics =
+      Map.merge(container_metrics, %{
+        last_return: metadata.timestamp,
+        return_count: Map.get(container_metrics, :return_count, 0) + 1
+      })
+
+    Map.put(store, container_id, updated_metrics)
+  end
+
+  defp update_container_terminate_metrics(store, metadata) do
+    container_id = metadata.container_id
+    container_metrics = Map.get(store, container_id, %{})
+
+    updated_metrics =
+      Map.merge(container_metrics, %{
+        terminated_at: metadata.timestamp,
+        termination_reason: metadata.reason
+      })
+
+    Map.put(store, container_id, updated_metrics)
+  end
+
+  defp update_task_execution_metrics(store, measurements, metadata) do
+    task_metrics = Map.get(store, :tasks, %{})
+
+    execution_time =
+      if is_number(measurements.execution_time), do: measurements.execution_time, else: 0
+
+    updated_metrics = %{
+      total_executions: Map.get(task_metrics, :total_executions, 0) + 1,
+      total_execution_time: Map.get(task_metrics, :total_execution_time, 0) + execution_time,
+      last_execution: metadata.timestamp
+    }
+
+    Map.put(store, :tasks, updated_metrics)
+  end
+
+  defp update_pool_status_metrics(store, measurements, metadata) do
+    Map.put(store, :pool_status, %{
+      warm_pool_size: measurements.warm_pool_size || 0,
+      active_containers: measurements.active_containers || 0,
+      total_containers: measurements.total_containers || 0,
+      last_updated: metadata.timestamp
+    })
   end
 
   defp update_prometheus_metrics(event_name, measurements, metadata) do
@@ -490,21 +512,19 @@ defmodule FLAME.ContainerMetrics do
   end
 
   defp get_scheduler_utilization do
-    try do
-      case :erlang.statistics(:scheduler_wall_time) do
-        stats when is_list(stats) ->
-          # Use available statistics if scheduler is available
-          case :erlang.system_info(:schedulers) do
-            # Mock value for now
-            n when is_integer(n) and n > 0 -> 50.0
-            _ -> 0.0
-          end
+    case :erlang.statistics(:scheduler_wall_time) do
+      stats when is_list(stats) ->
+        # Use available statistics if scheduler is available
+        case :erlang.system_info(:schedulers) do
+          # Mock value for now
+          n when is_integer(n) and n > 0 -> 50.0
+          _ -> 0.0
+        end
 
-        _other ->
-          0.0
-      end
-    catch
-      _, _ -> 0.0
+      _other ->
+        0.0
     end
+  catch
+    _, _ -> 0.0
   end
 end

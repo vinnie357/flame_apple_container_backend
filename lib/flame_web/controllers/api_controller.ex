@@ -15,10 +15,10 @@ defmodule FlameWeb.ApiController do
   require Logger
 
   alias FLAME.{
-    ClusterManager,
-    JobManager,
-    ImageManager,
     AlertManager,
+    ClusterManager,
+    ImageManager,
+    JobManager,
     ResourceManager
   }
 
@@ -580,32 +580,30 @@ defmodule FlameWeb.ApiController do
   Get high-level system metrics and health indicators.
   """
   def metrics_overview(conn, _params) do
-    try do
-      cluster_metrics = get_cluster_metrics()
-      job_metrics = get_job_metrics()
-      image_metrics = get_image_metrics()
-      resource_metrics = get_resource_metrics()
+    cluster_metrics = get_cluster_metrics()
+    job_metrics = get_job_metrics()
+    image_metrics = get_image_metrics()
+    resource_metrics = get_resource_metrics()
 
-      response = %{
-        timestamp: System.system_time(:millisecond),
-        clusters: cluster_metrics,
-        jobs: job_metrics,
-        images: image_metrics,
-        resources: resource_metrics,
-        api_version: @api_version
-      }
+    response = %{
+      timestamp: System.system_time(:millisecond),
+      clusters: cluster_metrics,
+      jobs: job_metrics,
+      images: image_metrics,
+      resources: resource_metrics,
+      api_version: @api_version
+    }
+
+    conn
+    |> put_status(:ok)
+    |> json(response)
+  rescue
+    error ->
+      Logger.error("Failed to retrieve metrics overview: #{inspect(error)}")
 
       conn
-      |> put_status(:ok)
-      |> json(response)
-    rescue
-      error ->
-        Logger.error("Failed to retrieve metrics overview: #{inspect(error)}")
-
-        conn
-        |> put_status(:service_unavailable)
-        |> json(%{error: "Failed to retrieve metrics", reason: "internal_error"})
-    end
+      |> put_status(:service_unavailable)
+      |> json(%{error: "Failed to retrieve metrics", reason: "internal_error"})
   end
 
   @doc """

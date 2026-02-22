@@ -26,7 +26,8 @@ defmodule FLAME.ClusterManager do
     :load_balancer,
     :failover_policies,
     :metrics_aggregator,
-    :failover_callback
+    :failover_callback,
+    :http_client
   ]
 
   # 30 seconds
@@ -123,7 +124,8 @@ defmodule FLAME.ClusterManager do
       load_balancer: initialize_load_balancer(cluster_config.load_balancing_strategy),
       failover_policies: initialize_failover_policies(opts),
       metrics_aggregator: initialize_metrics_aggregator(),
-      failover_callback: Keyword.get(opts, :failover_callback)
+      failover_callback: Keyword.get(opts, :failover_callback),
+      http_client: Keyword.get(opts, :http_client, &http_get/2)
     }
 
     # Register local cluster
@@ -305,23 +307,7 @@ defmodule FLAME.ClusterManager do
         # Perform failover
         case perform_failover(from_info, to_info, state) do
           :ok ->
-            # Update cluster status
-            state = put_in(state.clusters[from_cluster].status, :failed)
-
-            # Update primary cluster if needed
-            state =
-              if state.primary_cluster == from_cluster do
-                %{state | primary_cluster: to_cluster}
-              else
-                state
-              end
-
-            :telemetry.execute([:flame, :cluster_manager, :failover_completed], %{}, %{
-              from_cluster: from_cluster,
-              to_cluster: to_cluster,
-              reason: reason
-            })
-
+            state = apply_failover_state_changes(state, from_cluster, to_cluster, reason)
             {:reply, :ok, state}
         end
     end
@@ -385,6 +371,27 @@ defmodule FLAME.ClusterManager do
 
   ## Private Functions
 
+  defp apply_failover_state_changes(state, from_cluster, to_cluster, reason) do
+    # Update cluster status
+    state = put_in(state.clusters[from_cluster].status, :failed)
+
+    # Update primary cluster if needed
+    state =
+      if state.primary_cluster == from_cluster do
+        %{state | primary_cluster: to_cluster}
+      else
+        state
+      end
+
+    :telemetry.execute([:flame, :cluster_manager, :failover_completed], %{}, %{
+      from_cluster: from_cluster,
+      to_cluster: to_cluster,
+      reason: reason
+    })
+
+    state
+  end
+
   defp generate_cluster_id do
     hostname = :inet.gethostname() |> elem(1) |> to_string()
     timestamp = System.system_time(:millisecond)
@@ -420,34 +427,32 @@ defmodule FLAME.ClusterManager do
   end
 
   defp get_local_resources do
-    try do
-      case GenServer.call(ResourceManager, :get_resource_status, 5000) do
-        status when is_map(status) ->
-          %{
-            total_memory_gb: status.global_limits.max_total_memory_gb,
-            available_memory_gb:
-              status.global_limits.max_total_memory_gb - status.current_usage.memory_gb,
-            total_cpu_cores: status.global_limits.max_total_cpu_cores,
-            available_cpu_cores:
-              status.global_limits.max_total_cpu_cores - status.current_usage.cpu_cores,
-            max_containers: status.global_limits.max_concurrent_containers,
-            active_containers: status.current_usage.container_count
-          }
-
-        _ ->
-          get_default_resources()
-      end
-    catch
-      _ ->
+    case GenServer.call(ResourceManager, :get_resource_status, 5000) do
+      status when is_map(status) ->
         %{
-          total_memory_gb: 8,
-          available_memory_gb: 4,
-          total_cpu_cores: 4,
-          available_cpu_cores: 2,
-          max_containers: 20,
-          active_containers: 0
+          total_memory_gb: status.global_limits.max_total_memory_gb,
+          available_memory_gb:
+            status.global_limits.max_total_memory_gb - status.current_usage.memory_gb,
+          total_cpu_cores: status.global_limits.max_total_cpu_cores,
+          available_cpu_cores:
+            status.global_limits.max_total_cpu_cores - status.current_usage.cpu_cores,
+          max_containers: status.global_limits.max_concurrent_containers,
+          active_containers: status.current_usage.container_count
         }
+
+      _ ->
+        get_default_resources()
     end
+  catch
+    _ ->
+      %{
+        total_memory_gb: 8,
+        available_memory_gb: 4,
+        total_cpu_cores: 4,
+        available_cpu_cores: 2,
+        max_containers: 20,
+        active_containers: 0
+      }
   end
 
   defp get_default_resources do
@@ -473,7 +478,7 @@ defmodule FLAME.ClusterManager do
 
     case Enum.all?(required_fields, &Map.has_key?(config, &1)) do
       true ->
-        if is_list(config.endpoints) and length(config.endpoints) > 0 do
+        if is_list(config.endpoints) and config.endpoints != [] do
           :ok
         else
           {:error, :invalid_endpoints}
@@ -770,25 +775,26 @@ defmodule FLAME.ClusterManager do
         "Cluster #{cluster_id} exceeded failure threshold, initiating automatic failover"
       )
 
-      # Find best failover target
-      case find_failover_target(cluster_id, state) do
-        {:ok, target_cluster_id} ->
-          case trigger_failover(cluster_id, target_cluster_id, "automatic_health_failure") do
-            :ok ->
-              Logger.info(
-                "Automatic failover completed from #{cluster_id} to #{target_cluster_id}"
-              )
-
-            {:error, reason} ->
-              Logger.error("Automatic failover failed: #{reason}")
-          end
-
-        {:error, :no_suitable_target} ->
-          Logger.error("No suitable failover target found for cluster #{cluster_id}")
-      end
+      attempt_automatic_failover(cluster_id, state)
     end
 
     {:noreply, state}
+  end
+
+  defp attempt_automatic_failover(cluster_id, state) do
+    case find_failover_target(cluster_id, state) do
+      {:ok, target_cluster_id} ->
+        case trigger_failover(cluster_id, target_cluster_id, "automatic_health_failure") do
+          :ok ->
+            Logger.info("Automatic failover completed from #{cluster_id} to #{target_cluster_id}")
+
+          {:error, reason} ->
+            Logger.error("Automatic failover failed: #{reason}")
+        end
+
+      {:error, :no_suitable_target} ->
+        Logger.error("No suitable failover target found for cluster #{cluster_id}")
+    end
   end
 
   defp handle_cluster_recovery(cluster_id, state) do
@@ -900,12 +906,10 @@ defmodule FLAME.ClusterManager do
 
   defp execute_local_task(task_function, _options) do
     # Execute task on local FLAME backend
-    try do
-      result = FLAME.call(FlameAppleContainerBackend.ComputePool, task_function)
-      {:ok, result}
-    rescue
-      error -> {:error, error}
-    end
+    result = FLAME.call(FlameAppleContainerBackend.ComputePool, task_function)
+    {:ok, result}
+  rescue
+    error -> {:error, error}
   end
 
   defp execute_remote_task(task_function, cluster_info, options) do

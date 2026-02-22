@@ -1,9 +1,9 @@
 defmodule FLAME.ContainerPoolTest do
   use ExUnit.Case, async: false
 
-  alias FLAME.ContainerPool
   alias FLAME.ContainerHealth
   alias FLAME.ContainerMetrics
+  alias FLAME.ContainerPool
 
   setup do
     # Start the systems with test configuration

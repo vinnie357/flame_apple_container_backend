@@ -1,22 +1,8 @@
 import Config
 
-config :logger, level: :emergency
+config :logger, level: :warning
 
-config :flame_apple_container_backend,
-  test_mode: true,
-  flame_pool: %{
-    min: 0,
-    max: 5,
-    max_concurrency: 10,
-    boot_timeout: 60_000,
-    idle_shutdown_after: 30_000
-  },
-  flame_backend: %{
-    image: "flame-worker:test",
-    erlang_cookie: "test_cookie",
-    dns_domain: "test.local",
-    container_prefix: "test-flame"
-  }
+config :flame_apple_container_backend, test_mode: true
 
 config :flame_apple_container_backend, FlameWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],

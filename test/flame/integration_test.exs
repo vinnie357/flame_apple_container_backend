@@ -2,10 +2,10 @@ defmodule FLAME.IntegrationTest do
   use ExUnit.Case, async: false
 
   alias FLAME.AppleContainersBackend
-  alias FLAME.ContainerMetrics
-  alias FLAME.SecurityManager
-  alias FLAME.ResourceManager
   alias FLAME.CircuitBreaker
+  alias FLAME.ContainerMetrics
+  alias FLAME.ResourceManager
+  alias FLAME.SecurityManager
 
   @moduletag :integration
 
@@ -256,7 +256,7 @@ defmodule FLAME.IntegrationTest do
           _ -> false
         end)
 
-      assert length(failures) > 0
+      assert failures != []
 
       # Circuit breaker state should reflect failures
       state = CircuitBreaker.get_state(:task_execution)

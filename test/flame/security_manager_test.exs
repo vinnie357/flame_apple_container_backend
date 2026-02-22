@@ -40,8 +40,13 @@ defmodule FLAME.SecurityManagerTest do
 
     on_exit(fn ->
       # Only stop if we started it (not the application-level one)
-      if Process.alive?(security_manager) and security_manager != Process.whereis(SecurityManager) do
-        GenServer.stop(security_manager)
+      try do
+        if Process.alive?(security_manager) and
+             security_manager != Process.whereis(SecurityManager) do
+          GenServer.stop(security_manager)
+        end
+      catch
+        :exit, _ -> :ok
       end
     end)
 
@@ -188,7 +193,7 @@ defmodule FLAME.SecurityManagerTest do
           assert true
 
         :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - this is acceptable in test environment  
+          # SecurityManager was shut down during test suite - this is acceptable in test environment
           assert true
       end
     end
@@ -227,7 +232,7 @@ defmodule FLAME.SecurityManagerTest do
           assert true
 
         :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment  
+          # SecurityManager was shut down during test suite - acceptable in test environment
           assert true
       end
     end
@@ -313,7 +318,7 @@ defmodule FLAME.SecurityManagerTest do
           assert true
 
         :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment  
+          # SecurityManager was shut down during test suite - acceptable in test environment
           assert true
 
         :exit, {:noproc, _} ->
@@ -348,7 +353,7 @@ defmodule FLAME.SecurityManagerTest do
           assert true
 
         :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment  
+          # SecurityManager was shut down during test suite - acceptable in test environment
           assert true
 
         :exit, {:noproc, _} ->
@@ -374,7 +379,7 @@ defmodule FLAME.SecurityManagerTest do
           assert true
 
         :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment  
+          # SecurityManager was shut down during test suite - acceptable in test environment
           assert true
 
         :exit, {:noproc, _} ->
@@ -407,14 +412,14 @@ defmodule FLAME.SecurityManagerTest do
             Process.sleep(i * 20)
 
             try do
-              SecurityManager.execute_safely(fn -> test_function.(i) end, %{task_id: i}, 10000)
+              SecurityManager.execute_safely(fn -> test_function.(i) end, %{task_id: i}, 10_000)
             catch
               :exit, {:shutdown, _} ->
                 # SecurityManager was shut down during test suite - acceptable in test environment
                 {:ok, :shutdown}
 
               :exit, :shutdown ->
-                # SecurityManager was shut down during test suite - acceptable in test environment  
+                # SecurityManager was shut down during test suite - acceptable in test environment
                 {:ok, :shutdown}
 
               :exit, {:noproc, _} ->
@@ -429,7 +434,7 @@ defmodule FLAME.SecurityManagerTest do
         end)
 
       # Wait for all to complete with generous timeout
-      results = Task.await_many(tasks, 15000)
+      results = Task.await_many(tasks, 15_000)
 
       # All should complete (successfully or with expected errors)
       assert length(results) == 2

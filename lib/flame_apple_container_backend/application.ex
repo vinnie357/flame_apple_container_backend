@@ -65,18 +65,25 @@ defmodule FlameAppleContainerBackend.Application do
   end
 
   defp maybe_start_core_system(module, args, config) do
-    case {module, config} do
-      {FLAME.ContainerMetrics, %{enable_metrics: false}} -> nil
-      {FLAME.SecurityManager, %{enable_security: false}} -> nil
-      {FLAME.ResourceManager, %{enable_resource_management: false}} -> nil
-      {FLAME.Orchestrator, %{enable_orchestration: false}} -> nil
-      {FLAME.FunctionOptimizer, %{enable_optimization: false}} -> nil
-      {FLAME.ContainerHealth, %{minimal_mode: true}} -> nil
-      {FLAME.Orchestrator, %{minimal_mode: true}} -> nil
-      {FLAME.FunctionOptimizer, %{minimal_mode: true}} -> nil
-      _ -> {module, args}
+    if core_system_disabled?(module, config) do
+      nil
+    else
+      {module, args}
     end
   end
+
+  defp core_system_disabled?(FLAME.ContainerMetrics, %{enable_metrics: false}), do: true
+  defp core_system_disabled?(FLAME.SecurityManager, %{enable_security: false}), do: true
+
+  defp core_system_disabled?(FLAME.ResourceManager, %{enable_resource_management: false}),
+    do: true
+
+  defp core_system_disabled?(FLAME.Orchestrator, %{enable_orchestration: false}), do: true
+  defp core_system_disabled?(FLAME.FunctionOptimizer, %{enable_optimization: false}), do: true
+  defp core_system_disabled?(FLAME.ContainerHealth, %{minimal_mode: true}), do: true
+  defp core_system_disabled?(FLAME.Orchestrator, %{minimal_mode: true}), do: true
+  defp core_system_disabled?(FLAME.FunctionOptimizer, %{minimal_mode: true}), do: true
+  defp core_system_disabled?(_module, _config), do: false
 
   defp maybe_start_benchmarks(config) do
     if config.enable_benchmarks and config.environment in [:development, :test] do

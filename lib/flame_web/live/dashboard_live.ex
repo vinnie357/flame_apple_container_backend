@@ -753,65 +753,63 @@ defmodule FlameWeb.DashboardLive do
   end
 
   defp get_metrics_based_pool_status do
-    try do
-      case FLAME.ContainerMetrics.get_metrics_summary() do
-        %{pool_status: pool_status} when is_map(pool_status) ->
-          # Ensure the pool_status has required keys, otherwise return nil
-          if Map.has_key?(pool_status, :warm_pool_size) and
-               Map.has_key?(pool_status, :active_containers) and
-               Map.has_key?(pool_status, :total_containers) do
-            pool_status
-          else
-            nil
-          end
-
-        _ ->
+    case FLAME.ContainerMetrics.get_metrics_summary() do
+      %{pool_status: pool_status} when is_map(pool_status) ->
+        # Ensure the pool_status has required keys, otherwise return nil
+        if Map.has_key?(pool_status, :warm_pool_size) and
+             Map.has_key?(pool_status, :active_containers) and
+             Map.has_key?(pool_status, :total_containers) do
+          pool_status
+        else
           nil
-      end
-    rescue
-      _ -> nil
-    catch
-      :exit, _ -> nil
+        end
+
+      _ ->
+        nil
     end
+  rescue
+    _ -> nil
+  catch
+    :exit, _ -> nil
   end
 
   defp get_active_job_count do
     # Estimate active jobs from recent telemetry
-    try do
-      case FLAME.ContainerMetrics.get_metrics_summary() do
-        %{total_task_executions: total} when is_integer(total) ->
-          # Simple heuristic: assume 1-2 active jobs based on recent activity
-          min(2, div(total, 10))
+    case FLAME.ContainerMetrics.get_metrics_summary() do
+      %{total_task_executions: total} when is_integer(total) ->
+        # Simple heuristic: assume 1-2 active jobs based on recent activity
+        min(2, div(total, 10))
 
-        _ ->
-          0
-      end
-    rescue
-      _ -> 0
-    catch
-      :exit, _ -> 0
+      _ ->
+        0
     end
+  rescue
+    _ -> 0
+  catch
+    :exit, _ -> 0
   end
 
   defp get_resource_status do
     # Get real resource usage from containers and system
     containers = get_container_list()
 
-    if length(containers) > 0 do
+    container_count = Enum.count(containers)
+
+    if container_count > 0 do
       # Calculate aggregate resource usage from real containers
       total_memory_mb = Enum.sum(Enum.map(containers, & &1.memory_mb))
-      avg_cpu_percent = Enum.sum(Enum.map(containers, & &1.cpu_percent)) / length(containers)
+      avg_cpu_percent = Enum.sum(Enum.map(containers, & &1.cpu_percent)) / container_count
 
       # Estimate total available resources (rough approximation)
       # Assume 512MB per container
-      max_memory_mb = length(containers) * 512
+      max_memory_mb = container_count * 512
       memory_percentage = calculate_percentage(total_memory_mb, max_memory_mb)
 
       %{
         memory_percentage: memory_percentage,
         cpu_percentage: avg_cpu_percent,
         # Up to 10 containers = 100%
-        container_percentage: min(100, length(containers) * 10)
+        container_percentage: min(100, container_count * 10)
       }
     else
       # Fallback to ResourceManager if available
@@ -820,42 +818,40 @@ defmodule FlameWeb.DashboardLive do
   end
 
   defp get_resource_manager_status do
-    try do
-      case GenServer.call(FLAME.ResourceManager, :get_resource_status, 1000) do
-        status when is_map(status) ->
-          %{
-            memory_percentage:
-              calculate_percentage(
-                status.current_usage.memory_gb,
-                status.global_limits.max_total_memory_gb
-              ),
-            cpu_percentage:
-              calculate_percentage(
-                status.current_usage.cpu_cores,
-                status.global_limits.max_total_cpu_cores
-              ),
-            container_percentage:
-              calculate_percentage(
-                status.current_usage.container_count,
-                status.global_limits.max_concurrent_containers
-              )
-          }
-
-        _ ->
-          get_fallback_resource_status()
-      end
-    catch
-      :exit, {:timeout, _} ->
-        Logger.warning("ResourceManager timeout, using system metrics")
-        get_system_resource_status()
-
-      :exit, {:noproc, _} ->
-        Logger.warning("ResourceManager not available, using system metrics")
-        get_system_resource_status()
+    case GenServer.call(FLAME.ResourceManager, :get_resource_status, 1000) do
+      status when is_map(status) ->
+        %{
+          memory_percentage:
+            calculate_percentage(
+              status.current_usage.memory_gb,
+              status.global_limits.max_total_memory_gb
+            ),
+          cpu_percentage:
+            calculate_percentage(
+              status.current_usage.cpu_cores,
+              status.global_limits.max_total_cpu_cores
+            ),
+          container_percentage:
+            calculate_percentage(
+              status.current_usage.container_count,
+              status.global_limits.max_concurrent_containers
+            )
+        }
 
       _ ->
         get_fallback_resource_status()
     end
+  catch
+    :exit, {:timeout, _} ->
+      Logger.warning("ResourceManager timeout, using system metrics")
+      get_system_resource_status()
+
+    :exit, {:noproc, _} ->
+      Logger.warning("ResourceManager not available, using system metrics")
+      get_system_resource_status()
+
+    _ ->
+      get_fallback_resource_status()
   end
 
   defp get_system_resource_status do
@@ -874,15 +870,13 @@ defmodule FlameWeb.DashboardLive do
 
   defp get_system_cpu_usage do
     # Simple CPU usage estimation using available system info
-    try do
-      # Use reductions as a proxy for CPU activity
-      {_, reductions} = :erlang.statistics(:reductions)
-      # Convert to a percentage-like value
-      cpu_estimate = rem(reductions, 100)
-      min(100, max(1, cpu_estimate))
-    rescue
-      _ -> :rand.uniform(30) + 10
-    end
+    # Use reductions as a proxy for CPU activity
+    {_, reductions} = :erlang.statistics(:reductions)
+    # Convert to a percentage-like value
+    cpu_estimate = rem(reductions, 100)
+    min(100, max(1, cpu_estimate))
+  rescue
+    _ -> :rand.uniform(30) + 10
   end
 
   defp get_fallback_resource_status do
@@ -898,30 +892,28 @@ defmodule FlameWeb.DashboardLive do
   end
 
   defp get_task_metrics do
-    try do
-      case GenServer.call(FLAME.ContainerMetrics, :get_metrics_summary, 1000) do
-        metrics when is_map(metrics) ->
-          %{
-            total_executions: metrics.total_task_executions || 0,
-            average_execution_time: metrics.average_execution_time || 0,
-            error_rate: calculate_error_rate(metrics)
-          }
-
-        _ ->
-          %{total_executions: 0, average_execution_time: 0, error_rate: 0}
-      end
-    catch
-      :exit, {:timeout, _} ->
-        Logger.warning("ContainerMetrics timeout, using default values")
-        %{total_executions: 0, average_execution_time: 0, error_rate: 0}
-
-      :exit, {:noproc, _} ->
-        Logger.warning("ContainerMetrics not available, using default values")
-        %{total_executions: 0, average_execution_time: 0, error_rate: 0}
+    case GenServer.call(FLAME.ContainerMetrics, :get_metrics_summary, 1000) do
+      metrics when is_map(metrics) ->
+        %{
+          total_executions: metrics.total_task_executions || 0,
+          average_execution_time: metrics.average_execution_time || 0,
+          error_rate: calculate_error_rate(metrics)
+        }
 
       _ ->
         %{total_executions: 0, average_execution_time: 0, error_rate: 0}
     end
+  catch
+    :exit, {:timeout, _} ->
+      Logger.warning("ContainerMetrics timeout, using default values")
+      %{total_executions: 0, average_execution_time: 0, error_rate: 0}
+
+    :exit, {:noproc, _} ->
+      Logger.warning("ContainerMetrics not available, using default values")
+      %{total_executions: 0, average_execution_time: 0, error_rate: 0}
+
+    _ ->
+      %{total_executions: 0, average_execution_time: 0, error_rate: 0}
   end
 
   defp get_circuit_breaker_status do
@@ -1159,26 +1151,24 @@ defmodule FlameWeb.DashboardLive do
 
   defp get_telemetry_events do
     # Generate events based on recent metrics activity
-    try do
-      case FLAME.ContainerMetrics.get_metrics_summary() do
-        %{total_task_executions: total, average_execution_time: avg_time} when total > 0 ->
-          [
-            %{
-              timestamp: System.system_time(:millisecond) - :rand.uniform(300_000),
-              type: :success,
-              message: "Task execution completed successfully",
-              metadata: %{execution_time: trunc(avg_time), total_executions: total}
-            }
-          ]
+    case FLAME.ContainerMetrics.get_metrics_summary() do
+      %{total_task_executions: total, average_execution_time: avg_time} when total > 0 ->
+        [
+          %{
+            timestamp: System.system_time(:millisecond) - :rand.uniform(300_000),
+            type: :success,
+            message: "Task execution completed successfully",
+            metadata: %{execution_time: trunc(avg_time), total_executions: total}
+          }
+        ]
 
-        _ ->
-          []
-      end
-    rescue
-      _ -> []
-    catch
-      :exit, _ -> []
+      _ ->
+        []
     end
+  rescue
+    _ -> []
+  catch
+    :exit, _ -> []
   end
 
   defp get_container_events do

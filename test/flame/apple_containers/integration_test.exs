@@ -1,7 +1,7 @@
 defmodule FLAME.AppleContainers.IntegrationTest do
   use ExUnit.Case, async: false
 
-  alias FLAME.AppleContainers.{Manager, Pool, Monitor}
+  alias FLAME.AppleContainers.{Manager, Monitor, Pool}
   alias FLAME.AppleContainersBackend
 
   @moduletag :integration
@@ -465,7 +465,7 @@ defmodule FLAME.AppleContainers.IntegrationTest do
             Task.async(fn ->
               Manager.execute_task(manager, fn ->
                 # CPU intensive work
-                Enum.reduce(1..10000, 0, fn x, acc -> acc + x end)
+                Enum.reduce(1..10_000, 0, fn x, acc -> acc + x end)
               end)
             end)
           end

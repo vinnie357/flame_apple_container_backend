@@ -213,7 +213,7 @@ defmodule FLAME.AppleContainers.ManagerTest do
             assert true
 
           :exit, :shutdown ->
-            # Manager was shut down during test suite - acceptable in test environment  
+            # Manager was shut down during test suite - acceptable in test environment
             assert true
 
           :exit, {:noproc, _} ->
@@ -263,7 +263,7 @@ defmodule FLAME.AppleContainers.ManagerTest do
             assert true
 
           :exit, :shutdown ->
-            # Manager was shut down during test suite - acceptable in test environment  
+            # Manager was shut down during test suite - acceptable in test environment
             assert true
 
           :exit, {:noproc, _} ->
@@ -558,7 +558,7 @@ defmodule FLAME.AppleContainers.ManagerTest do
 
     test "handles invalid erlang_cookie type" do
       assert_raise ArgumentError, fn ->
-        Manager.start(erlang_cookie: 12345)
+        Manager.start(erlang_cookie: 12_345)
       end
     end
   end

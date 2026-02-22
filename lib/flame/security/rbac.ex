@@ -135,20 +135,24 @@ defmodule FLAME.Security.RBAC do
     :roles,
     :policies,
     :sessions,
-    :contexts
+    :contexts,
+    :auth_adapter
   ]
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def init(_opts) do
+  def init(opts) do
+    auth_adapter = Keyword.get(opts, :auth_adapter)
+
     state = %__MODULE__{
       users: %{},
       roles: @roles,
       policies: %{},
       sessions: %{},
-      contexts: %{}
+      contexts: %{},
+      auth_adapter: auth_adapter
     }
 
     Logger.info("RBAC system initialized with #{map_size(@roles)} roles")
@@ -196,7 +200,7 @@ defmodule FLAME.Security.RBAC do
   # GenServer callbacks
 
   def handle_call({:authenticate, username, password, opts}, _from, state) do
-    case authenticate_user_impl(username, password, opts) do
+    case authenticate_user_impl(username, password, opts, state) do
       {:ok, user} ->
         user_id = user.id
         updated_state = put_in(state.users[user_id], user)
@@ -261,7 +265,7 @@ defmodule FLAME.Security.RBAC do
         permission = "#{resource}:#{action}"
         user = session.user
 
-        authorized = is_authorized?(user, permission, context, state)
+        authorized = authorized?(user, permission, context, state)
 
         # Update session activity
         updated_session = put_in(session.last_activity, DateTime.utc_now())
@@ -390,19 +394,31 @@ defmodule FLAME.Security.RBAC do
 
   # Private implementation
 
-  defp authenticate_user_impl(username, password, opts) do
-    case Application.get_env(:flame_apple_container_backend, :auth_adapter) do
-      nil ->
-        Logger.warning(
-          "No auth adapter configured. Set :auth_adapter in :flame_apple_container_backend app config " <>
-            "to a module implementing authenticate/3."
-        )
+  defp authenticate_user_impl(username, password, opts, state) do
+    adapter = resolve_auth_adapter(state)
+    invoke_auth_adapter(adapter, username, password, opts)
+  end
 
-        {:error, :auth_adapter_not_configured}
+  defp resolve_auth_adapter(state) do
+    state.auth_adapter ||
+      Application.get_env(:flame_apple_container_backend, :auth_adapter)
+  end
 
-      adapter when is_atom(adapter) ->
-        adapter.authenticate(username, password, opts)
-    end
+  defp invoke_auth_adapter(nil, _username, _password, _opts) do
+    Logger.warning(
+      "No auth adapter configured. Set :auth_adapter in :flame_apple_container_backend app config " <>
+        "or pass auth_adapter: option to start_link/1."
+    )
+
+    {:error, :auth_adapter_not_configured}
+  end
+
+  defp invoke_auth_adapter(adapter, username, password, opts) when is_function(adapter, 3) do
+    adapter.(username, password, opts)
+  end
+
+  defp invoke_auth_adapter(adapter, username, password, opts) when is_atom(adapter) do
+    adapter.authenticate(username, password, opts)
   end
 
   defp get_session(state, session_id) do
@@ -413,7 +429,7 @@ defmodule FLAME.Security.RBAC do
     end
   end
 
-  defp is_authorized?(user, permission, context, state) do
+  defp authorized?(user, permission, context, state) do
     user_permissions = get_user_permissions_impl(user, state)
 
     # Check direct permission
@@ -479,17 +495,20 @@ defmodule FLAME.Security.RBAC do
 
   defp filter_sessions(sessions, filter) do
     Enum.filter(sessions, fn session ->
-      Enum.all?(filter, fn {key, value} ->
-        case key do
-          :active -> session.active == value
-          :user_id -> session.user_id == value
-          :created_after -> DateTime.compare(session.created_at, value) != :lt
-          :created_before -> DateTime.compare(session.created_at, value) != :gt
-          _ -> true
-        end
-      end)
+      Enum.all?(filter, &session_matches_filter?(session, &1))
     end)
   end
+
+  defp session_matches_filter?(session, {:active, value}), do: session.active == value
+  defp session_matches_filter?(session, {:user_id, value}), do: session.user_id == value
+
+  defp session_matches_filter?(session, {:created_after, value}),
+    do: DateTime.compare(session.created_at, value) != :lt
+
+  defp session_matches_filter?(session, {:created_before, value}),
+    do: DateTime.compare(session.created_at, value) != :gt
+
+  defp session_matches_filter?(_session, {_key, _value}), do: true
 
   defp generate_session_id do
     :crypto.strong_rand_bytes(32) |> Base.encode64(padding: false)

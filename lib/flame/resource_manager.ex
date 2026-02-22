@@ -201,9 +201,9 @@ defmodule FLAME.ResourceManager do
       :available
     else
       reasons = []
-      reasons = if not memory_available, do: [:memory_limit | reasons], else: reasons
-      reasons = if not cpu_available, do: [:cpu_limit | reasons], else: reasons
-      reasons = if not container_slots_available, do: [:container_limit | reasons], else: reasons
+      reasons = if memory_available, do: reasons, else: [:memory_limit | reasons]
+      reasons = if cpu_available, do: reasons, else: [:cpu_limit | reasons]
+      reasons = if container_slots_available, do: reasons, else: [:container_limit | reasons]
 
       {:unavailable, reasons}
     end
@@ -252,40 +252,36 @@ defmodule FLAME.ResourceManager do
   defp get_container_resource_usage(container_id) do
     # This would integrate with actual container monitoring
     # For now, return mock data
-    try do
-      # Try to get actual container stats
-      case System.cmd("container", ["stats", container_id, "--format", "json"],
-             stderr_to_stdout: true
-           ) do
-        {output, 0} ->
-          parse_container_stats(output)
+    # Try to get actual container stats
+    case System.cmd("container", ["stats", container_id, "--format", "json"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        parse_container_stats(output)
 
-        {_, _} ->
-          # Container might not be running, return zero usage
-          %{memory_mb: 0, cpu_percent: 0, disk_mb: 0, network_mbps: 0}
-      end
-    rescue
-      _ ->
-        # Fallback to zero usage if monitoring fails
+      {_, _} ->
+        # Container might not be running, return zero usage
         %{memory_mb: 0, cpu_percent: 0, disk_mb: 0, network_mbps: 0}
     end
+  rescue
+    _ ->
+      # Fallback to zero usage if monitoring fails
+      %{memory_mb: 0, cpu_percent: 0, disk_mb: 0, network_mbps: 0}
   end
 
   defp parse_container_stats(json_output) do
     # Parse container stats JSON - this would be more sophisticated in practice
-    try do
-      stats = Jason.decode!(json_output)
+    stats = Jason.decode!(json_output)
 
-      %{
-        memory_mb: get_in(stats, ["memory", "usage"]) || 0,
-        cpu_percent: get_in(stats, ["cpu", "percent"]) || 0,
-        disk_mb: get_in(stats, ["disk", "usage"]) || 0,
-        network_mbps: get_in(stats, ["network", "bandwidth"]) || 0
-      }
-    rescue
-      _ ->
-        %{memory_mb: 0, cpu_percent: 0, disk_mb: 0, network_mbps: 0}
-    end
+    %{
+      memory_mb: get_in(stats, ["memory", "usage"]) || 0,
+      cpu_percent: get_in(stats, ["cpu", "percent"]) || 0,
+      disk_mb: get_in(stats, ["disk", "usage"]) || 0,
+      network_mbps: get_in(stats, ["network", "bandwidth"]) || 0
+    }
+  rescue
+    _ ->
+      %{memory_mb: 0, cpu_percent: 0, disk_mb: 0, network_mbps: 0}
   end
 
   defp check_limit_violations(container_id, container_info) do

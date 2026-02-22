@@ -52,13 +52,11 @@ defmodule FLAME.RealDataIntegrationTest do
         end
 
         def calculate_uptime(created_at) when is_binary(created_at) do
-          try do
-            {:ok, created_datetime, _} = DateTime.from_iso8601(created_at)
-            DateTime.diff(DateTime.utc_now(), created_datetime, :millisecond)
-          rescue
-            # 1 hour fallback
-            _ -> 3_600_000
-          end
+          {:ok, created_datetime, _} = DateTime.from_iso8601(created_at)
+          DateTime.diff(DateTime.utc_now(), created_datetime, :millisecond)
+        rescue
+          # 1 hour fallback
+          _ -> 3_600_000
         end
 
         def calculate_uptime(_), do: 3_600_000
@@ -152,7 +150,7 @@ defmodule FLAME.RealDataIntegrationTest do
       containers = MockDashboard.get_fallback_container_list()
 
       assert is_list(containers)
-      assert length(containers) > 0
+      assert containers != []
 
       # Check structure of first container
       container = hd(containers)

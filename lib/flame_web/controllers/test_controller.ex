@@ -100,39 +100,38 @@ defmodule FlameWeb.TestController do
   def execute_test_jobs(job_type, count) do
     IO.puts("🚀 Starting #{count} #{job_type} test jobs...")
 
-    jobs =
-      case job_type do
-        :simple -> simple_jobs(count)
-        :complex -> complex_jobs(count)
-        :error -> error_jobs(count)
-        :mixed -> mixed_jobs(count)
-        :ml -> ml_jobs(count)
-        "simple" -> simple_jobs(count)
-        "complex" -> complex_jobs(count)
-        "error" -> error_jobs(count)
-        "mixed" -> mixed_jobs(count)
-        "ml" -> ml_jobs(count)
-        _ -> simple_jobs(count)
-      end
+    jobs = build_jobs_for_type(job_type, count)
 
     # Execute jobs with realistic delays
     Enum.with_index(jobs, 1)
     |> Enum.each(fn {job, index} ->
       IO.puts("📋 Executing job #{index}/#{count}: #{job.name}")
-
-      case execute_flame_job(job) do
-        {:ok, result} ->
-          IO.puts("✅ Job #{index} completed: #{inspect(result)}")
-
-        {:error, reason} ->
-          IO.puts("❌ Job #{index} failed: #{inspect(reason)}")
-      end
+      log_job_result(execute_flame_job(job), index)
 
       # Add small delay between jobs for tests
       if index < count, do: Process.sleep(100)
     end)
 
     IO.puts("🎉 All #{count} jobs completed!")
+  end
+
+  defp build_jobs_for_type(job_type, count) do
+    case job_type do
+      type when type in [:simple, "simple"] -> simple_jobs(count)
+      type when type in [:complex, "complex"] -> complex_jobs(count)
+      type when type in [:error, "error"] -> error_jobs(count)
+      type when type in [:mixed, "mixed"] -> mixed_jobs(count)
+      type when type in [:ml, "ml"] -> ml_jobs(count)
+      _ -> simple_jobs(count)
+    end
+  end
+
+  defp log_job_result({:ok, result}, index) do
+    IO.puts("✅ Job #{index} completed: #{inspect(result)}")
+  end
+
+  defp log_job_result({:error, reason}, index) do
+    IO.puts("❌ Job #{index} failed: #{inspect(reason)}")
   end
 
   defp execute_flame_job(job_params) do
@@ -149,69 +148,46 @@ defmodule FlameWeb.TestController do
 
     start_time = System.monotonic_time(:millisecond)
 
-    try do
-      # Try to use real FLAME pool for execution, fall back to local execution if unavailable
-      result =
-        try do
-          FLAME.call(
-            FlameAppleContainerBackend.Pool,
-            fn ->
-              case job[:type] do
-                :simple ->
-                  simulate_simple_computation(job[:data])
+    result = dispatch_job(job)
+    execution_time = System.monotonic_time(:millisecond) - start_time
 
-                :complex ->
-                  simulate_complex_computation(job[:data])
+    # Record successful completion
+    FLAME.ContainerMetrics.record_task_completion(task_id, execution_time, %{
+      completed_at: System.system_time(:millisecond),
+      result_size: byte_size(inspect(result))
+    })
 
-                :error ->
-                  simulate_error_job(job[:data])
+    {:ok, result}
+  rescue
+    error ->
+      job = normalize_job_params(job_params)
+      task_id = job[:id] || "task-#{System.unique_integer()}"
 
-                :ml ->
-                  simulate_ml_job_proper(job[:data])
-              end
-            end,
-            timeout: 5000
-          )
-        catch
-          # Fall back to local execution if FLAME is not available (e.g., in tests)
-          :exit, _ ->
-            case job[:type] do
-              :simple ->
-                simulate_simple_computation(job[:data])
-
-              :complex ->
-                simulate_complex_computation(job[:data])
-
-              :error ->
-                simulate_error_job(job[:data])
-
-              :ml ->
-                simulate_ml_job_proper(job[:data])
-            end
-        end
-
-      execution_time = System.monotonic_time(:millisecond) - start_time
-
-      # Record successful completion
-      FLAME.ContainerMetrics.record_task_completion(task_id, execution_time, %{
-        completed_at: System.system_time(:millisecond),
-        result_size: byte_size(inspect(result))
+      # Record error
+      FLAME.ContainerMetrics.record_task_error(task_id, error.__struct__, %{
+        error_at: System.system_time(:millisecond),
+        error_message: Exception.message(error)
       })
 
-      {:ok, result}
-    rescue
-      error ->
-        _execution_time = System.monotonic_time(:millisecond) - start_time
-
-        # Record error
-        FLAME.ContainerMetrics.record_task_error(task_id, error.__struct__, %{
-          error_at: System.system_time(:millisecond),
-          error_message: Exception.message(error)
-        })
-
-        {:error, error}
-    end
+      {:error, error}
   end
+
+  defp dispatch_job(job) do
+    FLAME.call(
+      FlameAppleContainerBackend.Pool,
+      fn -> run_job_simulation(job[:type], job[:data]) end,
+      timeout: 5000
+    )
+  catch
+    # Fall back to local execution if FLAME is not available (e.g., in tests)
+    :exit, _ ->
+      run_job_simulation(job[:type], job[:data])
+  end
+
+  defp run_job_simulation(:simple, data), do: simulate_simple_computation(data)
+  defp run_job_simulation(:complex, data), do: simulate_complex_computation(data)
+  defp run_job_simulation(:error, data), do: simulate_error_job(data)
+  defp run_job_simulation(:ml, data), do: simulate_ml_job_proper(data)
 
   defp simple_jobs(count) do
     Enum.map(1..count, fn i ->
@@ -356,33 +332,7 @@ defmodule FlameWeb.TestController do
 
   defp simulate_error_job(data) do
     # Handle both proper error job data and mixed job data
-    error_type =
-      case data do
-        # Handle atom keys (internal calls)
-        %{error_type: et} ->
-          et
-
-        # Handle string keys (HTTP requests)
-        %{"error_type" => et} when is_binary(et) ->
-          case et do
-            "timeout" -> :timeout
-            "memory" -> :memory
-            "network" -> :network
-            "validation" -> :validation
-            _ -> :timeout
-          end
-
-        %{"error_type" => et} when is_atom(et) ->
-          et
-
-        # Generate for mixed jobs
-        %{iteration: _i, complexity: _c} ->
-          Enum.random([:timeout, :memory, :network])
-
-        # Default
-        _ ->
-          :timeout
-      end
+    error_type = extract_error_type(data)
 
     # Fast execution for tests: 20-100ms
     Process.sleep(:rand.uniform(80) + 20)
@@ -418,6 +368,25 @@ defmodule FlameWeb.TestController do
     end
   end
 
+  defp extract_error_type(%{error_type: et}), do: et
+
+  defp extract_error_type(%{"error_type" => et}) when is_binary(et) do
+    case et do
+      "timeout" -> :timeout
+      "memory" -> :memory
+      "network" -> :network
+      "validation" -> :validation
+      _ -> :timeout
+    end
+  end
+
+  defp extract_error_type(%{"error_type" => et}) when is_atom(et), do: et
+
+  defp extract_error_type(%{iteration: _i, complexity: _c}),
+    do: Enum.random([:timeout, :memory, :network])
+
+  defp extract_error_type(_), do: :timeout
+
   defp simulate_ml_job_proper(data) do
     # Handle both proper ML job data and fallback data
     {model_type, dataset_size, epochs} =
@@ -433,7 +402,7 @@ defmodule FlameWeb.TestController do
 
     # Shorter processing time for tests
     # Cap at 100ms for tests
-    base_time = min(100, dataset_size / 10000)
+    base_time = min(100, dataset_size / 10_000)
     # Max 5 epochs worth
     processing_time = round(base_time + min(epochs, 5) * 2)
     Process.sleep(processing_time)
@@ -472,56 +441,48 @@ defmodule FlameWeb.TestController do
   # Status helper functions
 
   defp get_pool_status do
-    try do
-      FLAME.ContainerPool.get_pool_status()
-    rescue
-      _ -> %{warm_pool_size: 0, active_containers: 0, total_containers: 0}
-    catch
-      :exit, _ -> %{warm_pool_size: 0, active_containers: 0, total_containers: 0}
-    end
+    FLAME.ContainerPool.get_pool_status()
+  rescue
+    _ -> %{warm_pool_size: 0, active_containers: 0, total_containers: 0}
+  catch
+    :exit, _ -> %{warm_pool_size: 0, active_containers: 0, total_containers: 0}
   end
 
   defp get_metrics_summary do
-    try do
-      FLAME.ContainerMetrics.get_metrics_summary()
-    rescue
-      _ -> %{total_task_executions: 0, average_execution_time: 0}
-    catch
-      :exit, _ -> %{total_task_executions: 0, average_execution_time: 0}
-    end
+    FLAME.ContainerMetrics.get_metrics_summary()
+  rescue
+    _ -> %{total_task_executions: 0, average_execution_time: 0}
+  catch
+    :exit, _ -> %{total_task_executions: 0, average_execution_time: 0}
   end
 
   defp get_resource_status do
-    try do
-      FLAME.ResourceManager.get_resource_status()
-    rescue
-      _ -> %{utilization_percentage: 0, container_count: 0}
-    catch
-      :exit, _ -> %{utilization_percentage: 0, container_count: 0}
-    end
+    FLAME.ResourceManager.get_resource_status()
+  rescue
+    _ -> %{utilization_percentage: 0, container_count: 0}
+  catch
+    :exit, _ -> %{utilization_percentage: 0, container_count: 0}
   end
 
   defp get_circuit_breaker_status do
-    try do
+    %{
+      task_execution: FLAME.CircuitBreaker.get_state(:task_execution),
+      container_provisioning: FLAME.CircuitBreaker.get_state(:container_provisioning),
+      container_health: FLAME.CircuitBreaker.get_state(:container_health)
+    }
+  rescue
+    _ ->
       %{
-        task_execution: FLAME.CircuitBreaker.get_state(:task_execution),
-        container_provisioning: FLAME.CircuitBreaker.get_state(:container_provisioning),
-        container_health: FLAME.CircuitBreaker.get_state(:container_health)
+        task_execution: %{state: :unknown},
+        container_provisioning: %{state: :unknown},
+        container_health: %{state: :unknown}
       }
-    rescue
-      _ ->
-        %{
-          task_execution: %{state: :unknown},
-          container_provisioning: %{state: :unknown},
-          container_health: %{state: :unknown}
-        }
-    catch
-      :exit, _ ->
-        %{
-          task_execution: %{state: :unknown},
-          container_provisioning: %{state: :unknown},
-          container_health: %{state: :unknown}
-        }
-    end
+  catch
+    :exit, _ ->
+      %{
+        task_execution: %{state: :unknown},
+        container_provisioning: %{state: :unknown},
+        container_health: %{state: :unknown}
+      }
   end
 end

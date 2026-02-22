@@ -217,7 +217,7 @@ defmodule FLAME.Security.AuditLogger do
   end
 
   def handle_info(:flush_buffer, state) do
-    if length(state.buffer) > 0 do
+    if state.buffer != [] do
       flush_buffer(state.buffer, state)
       schedule_buffer_flush()
       {:noreply, %{state | buffer: []}}
@@ -278,18 +278,13 @@ defmodule FLAME.Security.AuditLogger do
   defp matches_alert_rule?(event, rule) do
     case rule.type do
       :failed_authentication_threshold ->
-        event.category == :authentication and
-          event.event == "authentication_failed" and
-          check_threshold(event, rule)
+        matches_failed_auth?(event, rule)
 
       :privilege_escalation ->
-        event.category == :authorization and
-          event.event == "role_assigned" and
-          event.role in ["admin", "operator"]
+        matches_privilege_escalation?(event)
 
       :bulk_data_access ->
-        event.category == :resource_access and
-          check_bulk_access(event, rule)
+        matches_bulk_data_access?(event, rule)
 
       :suspicious_activity ->
         event.category == :security
@@ -297,6 +292,23 @@ defmodule FLAME.Security.AuditLogger do
       _ ->
         false
     end
+  end
+
+  defp matches_failed_auth?(event, rule) do
+    event.category == :authentication and
+      event.event == "authentication_failed" and
+      check_threshold(event, rule)
+  end
+
+  defp matches_privilege_escalation?(event) do
+    event.category == :authorization and
+      event.event == "role_assigned" and
+      event.role in ["admin", "operator"]
+  end
+
+  defp matches_bulk_data_access?(event, rule) do
+    event.category == :resource_access and
+      check_bulk_access(event, rule)
   end
 
   defp check_threshold(_event, _rule) do
@@ -334,10 +346,7 @@ defmodule FLAME.Security.AuditLogger do
   defp store_events(:file, events, _state) do
     log_file = Path.join([System.tmp_dir(), "flame_audit.log"])
 
-    log_entries =
-      events
-      |> Enum.map(&format_log_entry/1)
-      |> Enum.join("\n")
+    log_entries = Enum.map_join(events, "\n", &format_log_entry/1)
 
     File.write!(log_file, log_entries <> "\n", [:append])
   end
@@ -387,30 +396,34 @@ defmodule FLAME.Security.AuditLogger do
 
   defp filter_by_criteria(events, criteria) do
     Enum.filter(events, fn event ->
-      Enum.all?(criteria, fn {key, value} ->
-        case key do
-          :category ->
-            event["category"] == to_string(value)
-
-          :event ->
-            event["event"] == value
-
-          :user_id ->
-            get_in(event, ["data", "user_id"]) == value
-
-          :date_from ->
-            {:ok, event_date, _} = DateTime.from_iso8601(event["timestamp"])
-            DateTime.compare(event_date, value) != :lt
-
-          :date_to ->
-            {:ok, event_date, _} = DateTime.from_iso8601(event["timestamp"])
-            DateTime.compare(event_date, value) != :gt
-
-          _ ->
-            true
-        end
-      end)
+      Enum.all?(criteria, &event_matches_criterion?(event, &1))
     end)
+  end
+
+  defp event_matches_criterion?(event, {:category, value}) do
+    event["category"] == to_string(value)
+  end
+
+  defp event_matches_criterion?(event, {:event, value}) do
+    event["event"] == value
+  end
+
+  defp event_matches_criterion?(event, {:user_id, value}) do
+    get_in(event, ["data", "user_id"]) == value
+  end
+
+  defp event_matches_criterion?(event, {:date_from, value}) do
+    {:ok, event_date, _} = DateTime.from_iso8601(event["timestamp"])
+    DateTime.compare(event_date, value) != :lt
+  end
+
+  defp event_matches_criterion?(event, {:date_to, value}) do
+    {:ok, event_date, _} = DateTime.from_iso8601(event["timestamp"])
+    DateTime.compare(event_date, value) != :gt
+  end
+
+  defp event_matches_criterion?(_event, {_key, _value}) do
+    true
   end
 
   defp export_logs_impl(format, criteria, state) do
@@ -471,8 +484,7 @@ defmodule FLAME.Security.AuditLogger do
       get_in(event, ["data", "resource"]) || "",
       get_in(event, ["data", "action"]) || ""
     ]
-    |> Enum.map(&escape_csv_field/1)
-    |> Enum.join(",")
+    |> Enum.map_join(",", &escape_csv_field/1)
     |> Kernel.<>("\n")
   end
 
@@ -724,7 +736,7 @@ defmodule FLAME.Security.AuditLogger do
         recommendations
       end
 
-    if length(recommendations) == 0 do
+    if recommendations == [] do
       ["Security posture appears healthy"]
     else
       recommendations

@@ -87,19 +87,17 @@ defmodule TestHelpers do
   end
 
   defp check_assertion(assertion_fn, end_time, interval) do
-    try do
-      assertion_fn.()
-    rescue
-      ExUnit.AssertionError ->
-        current_time = System.monotonic_time(:millisecond)
+    assertion_fn.()
+  rescue
+    ExUnit.AssertionError ->
+      current_time = System.monotonic_time(:millisecond)
 
-        if current_time < end_time do
-          Process.sleep(interval)
-          check_assertion(assertion_fn, end_time, interval)
-        else
-          # Let it fail with the assertion error
-          assertion_fn.()
-        end
-    end
+      if current_time < end_time do
+        Process.sleep(interval)
+        check_assertion(assertion_fn, end_time, interval)
+      else
+        # Let it fail with the assertion error
+        assertion_fn.()
+      end
   end
 end

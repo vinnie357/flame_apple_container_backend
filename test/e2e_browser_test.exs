@@ -239,28 +239,32 @@ defmodule E2EBrowserTest do
 
         IO.puts("   🔄 Executing job #{current_job}/#{total_jobs}: #{job_id}")
 
-        # Execute job with real metrics recording
-        result = execute_monitored_job(job_id, job_type, i)
-
-        case result do
-          {:ok, _data} ->
-            IO.puts("   ✅ Job #{job_id} completed successfully")
-
-          {:error, reason} ->
-            IO.puts("   ❌ Job #{job_id} failed: #{inspect(reason)}")
-        end
-
-        # Pause between jobs to show progression in dashboard
-        if current_job < total_jobs do
-          IO.puts("   ⏳ Pausing 3 seconds (check dashboard for updates)...")
-          Process.sleep(3000)
-        end
+        execute_and_report_job(job_id, job_type, i, current_job, total_jobs)
       end)
     end)
 
     # Stop metrics generator
     GenServer.stop(metrics_generator)
     IO.puts("\n✅ All test jobs completed")
+  end
+
+  defp execute_and_report_job(job_id, job_type, iteration, current_job, total_jobs) do
+    # Execute job with real metrics recording
+    result = execute_monitored_job(job_id, job_type, iteration)
+
+    case result do
+      {:ok, _data} ->
+        IO.puts("   ✅ Job #{job_id} completed successfully")
+
+      {:error, reason} ->
+        IO.puts("   ❌ Job #{job_id} failed: #{inspect(reason)}")
+    end
+
+    # Pause between jobs to show progression in dashboard
+    if current_job < total_jobs do
+      IO.puts("   ⏳ Pausing 3 seconds (check dashboard for updates)...")
+      Process.sleep(3000)
+    end
   end
 
   defp demonstrate_advanced_features do
@@ -587,11 +591,9 @@ defmodule E2EBrowserTest do
   end
 
   defp get_safe_status(status_fn, system_name) do
-    try do
-      status_fn.()
-    rescue
-      _ -> %{error: "#{system_name} not available"}
-    end
+    status_fn.()
+  rescue
+    _ -> %{error: "#{system_name} not available"}
   end
 
   defp format_status(%{warm_pool_size: warm, active_containers: active, total_containers: total}) do

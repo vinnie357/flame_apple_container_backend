@@ -300,33 +300,8 @@ defmodule FLAME.ImageManager do
         {:reply, {:error, :deployment_not_found}, state}
 
       deployment_record ->
-        target_id =
-          target_image_id || get_previous_deployed_image(deployment_record.image_id, state)
-
-        case target_id do
-          nil ->
-            {:reply, {:error, :no_rollback_target}, state}
-
-          target ->
-            case perform_rollback(deployment_record, target, state) do
-              {:ok, rollback_result} ->
-                Logger.info(
-                  "Successfully rolled back deployment #{deployment_id} to image #{target}"
-                )
-
-                # Send telemetry
-                :telemetry.execute([:flame, :image, :rollback], %{}, %{
-                  deployment_id: deployment_id,
-                  target_image_id: target
-                })
-
-                {:reply, {:ok, rollback_result}, state}
-
-              {:error, reason} ->
-                Logger.error("Failed to rollback deployment #{deployment_id}: #{reason}")
-                {:reply, {:error, reason}, state}
-            end
-        end
+        result = execute_rollback(deployment_id, deployment_record, target_image_id, state)
+        {:reply, result, state}
     end
   end
 
@@ -356,34 +331,9 @@ defmodule FLAME.ImageManager do
         {:reply, {:error, :image_not_found}, state}
 
       image_info ->
-        case validate_promotion(image_info, from_stage, to_stage) do
-          :ok ->
-            case perform_promotion(image_info, from_stage, to_stage) do
-              {:ok, promotion_result} ->
-                # Update image metadata
-                stage_history = Map.get(image_info.metadata, :stage_history, [])
-
-                promotion_record = %{
-                  from: from_stage,
-                  to: to_stage,
-                  promoted_at: System.system_time(:millisecond),
-                  # Could be user ID in real implementation
-                  promoted_by: "system"
-                }
-
-                state =
-                  put_in(state.images[image_id].metadata.stage_history, [
-                    promotion_record | stage_history
-                  ])
-
-                state = put_in(state.images[image_id].metadata.current_stage, to_stage)
-
-                Logger.info("Promoted image #{image_id} from #{from_stage} to #{to_stage}")
-                {:reply, {:ok, promotion_result}, state}
-
-              {:error, reason} ->
-                {:reply, {:error, reason}, state}
-            end
+        case execute_promotion(image_id, image_info, from_stage, to_stage, state) do
+          {:ok, promotion_result, updated_state} ->
+            {:reply, {:ok, promotion_result}, updated_state}
 
           {:error, reason} ->
             {:reply, {:error, reason}, state}
@@ -483,51 +433,7 @@ defmodule FLAME.ImageManager do
         {:noreply, state}
 
       image_info ->
-        {new_state, scan_status} =
-          case scan_result do
-            {:ok, scan_data} ->
-              if scan_data.vulnerabilities.critical > 0 or scan_data.vulnerabilities.high > 5 do
-                {@state_scan_failed, :failed}
-              else
-                {@state_scan_passed, :passed}
-              end
-
-            {:error, _reason} ->
-              {@state_scan_failed, :error}
-          end
-
-        updated_image = %{
-          image_info
-          | state: new_state,
-            updated_at: System.system_time(:millisecond),
-            scan_results: scan_result
-        }
-
-        state = put_in(state.images[image_id], updated_image)
-
-        # If scan passed, mark image as ready for deployment
-        state =
-          if new_state == @state_scan_passed do
-            put_in(state.images[image_id].state, @state_ready)
-          else
-            state
-          end
-
-        Logger.info(
-          "Security scan #{scan_status} for image: #{image_info.name}:#{image_info.version}"
-        )
-
-        # Send alert if scan failed
-        if scan_status == :failed do
-          AlertManager.trigger_manual_alert(%{
-            name: "Image Security Scan Failed",
-            severity: 2,
-            description:
-              "Security vulnerabilities found in #{image_info.name}:#{image_info.version}",
-            tags: ["image", "security", "vulnerability"]
-          })
-        end
-
+        state = process_scan_result(image_id, image_info, scan_result, state)
         {:noreply, state}
     end
   end
@@ -570,6 +476,55 @@ defmodule FLAME.ImageManager do
   end
 
   ## Private Functions
+
+  defp process_scan_result(image_id, image_info, scan_result, state) do
+    {new_state, scan_status} = determine_scan_outcome(scan_result)
+
+    updated_image = %{
+      image_info
+      | state: new_state,
+        updated_at: System.system_time(:millisecond),
+        scan_results: scan_result
+    }
+
+    state = put_in(state.images[image_id], updated_image)
+
+    # If scan passed, mark image as ready for deployment
+    state =
+      if new_state == @state_scan_passed do
+        put_in(state.images[image_id].state, @state_ready)
+      else
+        state
+      end
+
+    Logger.info(
+      "Security scan #{scan_status} for image: #{image_info.name}:#{image_info.version}"
+    )
+
+    # Send alert if scan failed
+    if scan_status == :failed do
+      AlertManager.trigger_manual_alert(%{
+        name: "Image Security Scan Failed",
+        severity: 2,
+        description: "Security vulnerabilities found in #{image_info.name}:#{image_info.version}",
+        tags: ["image", "security", "vulnerability"]
+      })
+    end
+
+    state
+  end
+
+  defp determine_scan_outcome({:ok, scan_data}) do
+    if scan_data.vulnerabilities.critical > 0 or scan_data.vulnerabilities.high > 5 do
+      {@state_scan_failed, :failed}
+    else
+      {@state_scan_passed, :passed}
+    end
+  end
+
+  defp determine_scan_outcome({:error, _reason}) do
+    {@state_scan_failed, :error}
+  end
 
   defp initialize_registries(opts) do
     default_registry = %{
@@ -751,9 +706,7 @@ defmodule FLAME.ImageManager do
   end
 
   defp perform_security_scan(image_info, scanner_config) do
-    if not scanner_config.enabled do
-      {:ok, %{vulnerabilities: %{critical: 0, high: 0, medium: 0, low: 0}}}
-    else
+    if scanner_config.enabled do
       Logger.info("Starting security scan for #{image_info.name}:#{image_info.version}")
 
       case Map.get(scanner_config, :command) do
@@ -779,6 +732,8 @@ defmodule FLAME.ImageManager do
 
           {:ok, scan_results}
       end
+    else
+      {:ok, %{vulnerabilities: %{critical: 0, high: 0, medium: 0, low: 0}}}
     end
   rescue
     error ->
@@ -923,6 +878,33 @@ defmodule FLAME.ImageManager do
       {:error, "Rollback failed: #{inspect(error)}"}
   end
 
+  defp execute_rollback(deployment_id, deployment_record, target_image_id, state) do
+    target_id =
+      target_image_id || get_previous_deployed_image(deployment_record.image_id, state)
+
+    case target_id do
+      nil ->
+        {:error, :no_rollback_target}
+
+      target ->
+        case perform_rollback(deployment_record, target, state) do
+          {:ok, rollback_result} ->
+            Logger.info("Successfully rolled back deployment #{deployment_id} to image #{target}")
+
+            :telemetry.execute([:flame, :image, :rollback], %{}, %{
+              deployment_id: deployment_id,
+              target_image_id: target
+            })
+
+            {:ok, rollback_result}
+
+          {:error, reason} ->
+            Logger.error("Failed to rollback deployment #{deployment_id}: #{reason}")
+            {:error, reason}
+        end
+    end
+  end
+
   defp get_previous_deployed_image(current_image_id, state) do
     # Find the most recently deployed image that's not the current one
     deployed_images =
@@ -935,6 +917,31 @@ defmodule FLAME.ImageManager do
     case deployed_images do
       [{id, _image} | _] -> id
       [] -> nil
+    end
+  end
+
+  defp execute_promotion(image_id, image_info, from_stage, to_stage, state) do
+    with :ok <- validate_promotion(image_info, from_stage, to_stage),
+         {:ok, promotion_result} <- perform_promotion(image_info, from_stage, to_stage) do
+      stage_history = Map.get(image_info.metadata, :stage_history, [])
+
+      promotion_record = %{
+        from: from_stage,
+        to: to_stage,
+        promoted_at: System.system_time(:millisecond),
+        # Could be user ID in real implementation
+        promoted_by: "system"
+      }
+
+      state =
+        put_in(state.images[image_id].metadata.stage_history, [
+          promotion_record | stage_history
+        ])
+
+      state = put_in(state.images[image_id].metadata.current_stage, to_stage)
+
+      Logger.info("Promoted image #{image_id} from #{from_stage} to #{to_stage}")
+      {:ok, promotion_result, state}
     end
   end
 
@@ -1020,17 +1027,18 @@ defmodule FLAME.ImageManager do
 
   defp apply_image_filters(images, filters) do
     Enum.filter(images, fn image ->
-      Enum.all?(filters, fn {key, value} ->
-        case key do
-          :state -> image.state == value
-          :name -> String.contains?(image.name, value)
-          :version -> String.contains?(image.version, value)
-          :tag -> value in Map.get(image.metadata, :tags, [])
-          _ -> true
-        end
-      end)
+      Enum.all?(filters, &image_matches_filter?(image, &1))
     end)
   end
+
+  defp image_matches_filter?(image, {:state, value}), do: image.state == value
+  defp image_matches_filter?(image, {:name, value}), do: String.contains?(image.name, value)
+  defp image_matches_filter?(image, {:version, value}), do: String.contains?(image.version, value)
+
+  defp image_matches_filter?(image, {:tag, value}),
+    do: value in Map.get(image.metadata, :tags, [])
+
+  defp image_matches_filter?(_image, {_key, _value}), do: true
 
   defp calculate_build_duration(image_info) do
     if image_info.state in [@state_built, @state_ready, @state_deployed] do
@@ -1096,42 +1104,48 @@ defmodule FLAME.ImageManager do
         match?({:ok, _}, image.scan_results)
       end)
 
-    if length(scanned_images) > 0 do
-      total_vulns =
-        Enum.reduce(scanned_images, %{critical: 0, high: 0, medium: 0, low: 0}, fn image, acc ->
-          case image.scan_results do
-            {:ok, results} ->
-              vulns = results.vulnerabilities
+    scanned_count = Enum.count(scanned_images)
 
-              %{
-                critical: acc.critical + vulns.critical,
-                high: acc.high + vulns.high,
-                medium: acc.medium + vulns.medium,
-                low: acc.low + vulns.low
-              }
-
-            _ ->
-              acc
-          end
-        end)
+    if scanned_count > 0 do
+      total_vulns = sum_vulnerabilities(scanned_images)
 
       %{
-        total_scanned: length(scanned_images),
+        total_scanned: scanned_count,
         vulnerabilities: total_vulns,
-        clean_images:
-          Enum.count(scanned_images, fn image ->
-            case image.scan_results do
-              {:ok, results} ->
-                vulns = results.vulnerabilities
-                vulns.critical == 0 and vulns.high == 0
-
-              _ ->
-                false
-            end
-          end)
+        clean_images: Enum.count(scanned_images, &clean_image?/1)
       }
     else
       %{total_scanned: 0, vulnerabilities: %{}, clean_images: 0}
+    end
+  end
+
+  defp sum_vulnerabilities(scanned_images) do
+    Enum.reduce(scanned_images, %{critical: 0, high: 0, medium: 0, low: 0}, fn image, acc ->
+      case image.scan_results do
+        {:ok, results} ->
+          vulns = results.vulnerabilities
+
+          %{
+            critical: acc.critical + vulns.critical,
+            high: acc.high + vulns.high,
+            medium: acc.medium + vulns.medium,
+            low: acc.low + vulns.low
+          }
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp clean_image?(image) do
+    case image.scan_results do
+      {:ok, results} ->
+        vulns = results.vulnerabilities
+        vulns.critical == 0 and vulns.high == 0
+
+      _ ->
+        false
     end
   end
 
@@ -1141,8 +1155,10 @@ defmodule FLAME.ImageManager do
       |> Enum.map(&calculate_build_duration/1)
       |> Enum.reject(&is_nil/1)
 
-    if length(build_times) > 0 do
-      Enum.sum(build_times) / length(build_times)
+    build_count = Enum.count(build_times)
+
+    if build_count > 0 do
+      Enum.sum(build_times) / build_count
     else
       0
     end

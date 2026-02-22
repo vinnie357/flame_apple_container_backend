@@ -231,7 +231,7 @@ defmodule FLAME.AppleContainers.PoolTest do
       # Try to scale beyond max_size
       assert {:error, :invalid_size} = Pool.scale(pool, 10)
 
-      # Try to scale below min_size  
+      # Try to scale below min_size
       assert {:error, :invalid_size} = Pool.scale(pool, 0)
 
       Pool.shutdown(pool)

@@ -252,7 +252,7 @@ defmodule FLAME.ScalingTest do
       assert fallback_memory >= 100
       assert fallback_memory <= 500
 
-      # CPU fallback should be random but within bounds  
+      # CPU fallback should be random but within bounds
       fallback_cpu = :rand.uniform(60) + 10
       assert fallback_cpu >= 10
       assert fallback_cpu <= 70

@@ -12,13 +12,16 @@ defmodule FlameAppleContainerBackend.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      preferred_cli_env: [test: :test],
       description: description(),
       package: package(),
       docs: docs(),
       source_url: @source_url,
       homepage_url: @source_url
     ]
+  end
+
+  def cli do
+    [preferred_envs: [test: :test]]
   end
 
   def application do
@@ -67,20 +70,20 @@ defmodule FlameAppleContainerBackend.MixProject do
 
       # Optional web dependencies
       {:plug_cowboy, "~> 2.6", optional: true},
-      {:phoenix, "~> 1.7.0", optional: true},
-      {:phoenix_live_view, "~> 0.20.0", optional: true},
-      {:phoenix_html, "~> 3.3", optional: true},
+      {:phoenix, "~> 1.7 or ~> 1.8", optional: true},
+      {:phoenix_live_view, "~> 0.20 or ~> 1.0", optional: true},
+      {:phoenix_html, "~> 3.3 or ~> 4.0", optional: true},
       {:phoenix_live_dashboard, "~> 0.8", optional: true},
       {:phoenix_live_reload, "~> 1.2", only: :dev, optional: true},
       {:heroicons, "~> 0.5", optional: true},
 
       # Optional monitoring dependencies
-      {:telemetry_metrics, "~> 0.6", optional: true},
+      {:telemetry_metrics, "~> 0.6 or ~> 1.0", optional: true},
       {:telemetry_poller, "~> 1.0", optional: true},
-      {:prometheus_ex, "~> 3.0", optional: true},
+      {:prometheus_ex, "~> 3.0 or ~> 5.0", optional: true},
 
       # Optional advanced features
-      {:req, "~> 0.5.0", optional: true},
+      {:req, "~> 0.5", optional: true},
       {:fuse, "~> 2.4", optional: true},
       {:gen_state_machine, "~> 3.0", optional: true},
 
@@ -90,7 +93,7 @@ defmodule FlameAppleContainerBackend.MixProject do
       # Development and testing tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:floki, ">= 0.30.0", only: :test},
-      {:tidewave, "~> 0.1", only: :dev},
+      {:tidewave, "~> 0.5", only: :dev},
       {:bandit, "~> 1.0", only: :dev}
     ]
   end

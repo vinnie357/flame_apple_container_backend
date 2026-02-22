@@ -267,18 +267,22 @@ defmodule FLAME.SecurityManager do
         {:error, {:restricted_function, module, function_name}}
 
       true ->
-        case Atom.to_string(module) do
-          "Elixir." <> _ ->
-            # Custom Elixir module - allow but log
-            :ok
+        validate_unknown_module(module)
+    end
+  end
 
-          module_string ->
-            # Erlang module - be more cautious
-            if String.starts_with?(module_string, ":") do
-              {:error, {:untrusted_erlang_module, module}}
-            else
-              :ok
-            end
+  defp validate_unknown_module(module) do
+    case Atom.to_string(module) do
+      "Elixir." <> _ ->
+        # Custom Elixir module - allow but log
+        :ok
+
+      module_string ->
+        # Erlang module - be more cautious
+        if String.starts_with?(module_string, ":") do
+          {:error, {:untrusted_erlang_module, module}}
+        else
+          :ok
         end
     end
   end
