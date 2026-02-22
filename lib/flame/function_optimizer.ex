@@ -51,11 +51,13 @@ defmodule FLAME.FunctionOptimizer do
   }
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    config = Keyword.get(opts, :config, %{}) |> merge_default_config()
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    config = Keyword.get(clean_opts, :config, %{}) |> merge_default_config()
 
     state = %__MODULE__{
       optimization_config: config,
@@ -81,32 +83,32 @@ defmodule FLAME.FunctionOptimizer do
     {:ok, state}
   end
 
-  def optimize_function(function, metadata \\ %{}) do
-    GenServer.call(__MODULE__, {:optimize_function, function, metadata})
+  def optimize_function(function, metadata \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:optimize_function, function, metadata})
   end
 
-  def get_optimized_function(function_hash) do
-    GenServer.call(__MODULE__, {:get_optimized_function, function_hash})
+  def get_optimized_function(function_hash, server \\ __MODULE__) do
+    GenServer.call(server, {:get_optimized_function, function_hash})
   end
 
-  def inject_dependencies(function, dependencies) do
-    GenServer.call(__MODULE__, {:inject_dependencies, function, dependencies})
+  def inject_dependencies(function, dependencies, server \\ __MODULE__) do
+    GenServer.call(server, {:inject_dependencies, function, dependencies})
   end
 
-  def analyze_function_performance(function, execution_data) do
-    GenServer.call(__MODULE__, {:analyze_performance, function, execution_data})
+  def analyze_function_performance(function, execution_data, server \\ __MODULE__) do
+    GenServer.call(server, {:analyze_performance, function, execution_data})
   end
 
-  def get_optimization_suggestions(function_hash) do
-    GenServer.call(__MODULE__, {:get_suggestions, function_hash})
+  def get_optimization_suggestions(function_hash, server \\ __MODULE__) do
+    GenServer.call(server, {:get_suggestions, function_hash})
   end
 
-  def update_execution_stats(function_hash, execution_time, result_type) do
-    GenServer.cast(__MODULE__, {:update_stats, function_hash, execution_time, result_type})
+  def update_execution_stats(function_hash, execution_time, result_type, server \\ __MODULE__) do
+    GenServer.cast(server, {:update_stats, function_hash, execution_time, result_type})
   end
 
-  def clear_cache do
-    GenServer.cast(__MODULE__, :clear_cache)
+  def clear_cache(server \\ __MODULE__) do
+    GenServer.cast(server, :clear_cache)
   end
 
   # GenServer callbacks
