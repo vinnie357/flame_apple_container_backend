@@ -256,7 +256,7 @@ defmodule FLAME.IntegrationTest do
           _ -> false
         end)
 
-      assert length(failures) > 0
+      assert failures != []
 
       # Circuit breaker state should reflect failures
       state = CircuitBreaker.get_state(:task_execution)

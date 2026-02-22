@@ -1104,11 +1104,13 @@ defmodule FLAME.ImageManager do
         match?({:ok, _}, image.scan_results)
       end)
 
-    if length(scanned_images) > 0 do
+    scanned_count = Enum.count(scanned_images)
+
+    if scanned_count > 0 do
       total_vulns = sum_vulnerabilities(scanned_images)
 
       %{
-        total_scanned: length(scanned_images),
+        total_scanned: scanned_count,
         vulnerabilities: total_vulns,
         clean_images: Enum.count(scanned_images, &clean_image?/1)
       }
@@ -1153,8 +1155,10 @@ defmodule FLAME.ImageManager do
       |> Enum.map(&calculate_build_duration/1)
       |> Enum.reject(&is_nil/1)
 
-    if length(build_times) > 0 do
-      Enum.sum(build_times) / length(build_times)
+    build_count = Enum.count(build_times)
+
+    if build_count > 0 do
+      Enum.sum(build_times) / build_count
     else
       0
     end

@@ -793,21 +793,23 @@ defmodule FlameWeb.DashboardLive do
     # Get real resource usage from containers and system
     containers = get_container_list()
 
-    if length(containers) > 0 do
+    container_count = Enum.count(containers)
+
+    if container_count > 0 do
       # Calculate aggregate resource usage from real containers
       total_memory_mb = Enum.sum(Enum.map(containers, & &1.memory_mb))
-      avg_cpu_percent = Enum.sum(Enum.map(containers, & &1.cpu_percent)) / length(containers)
+      avg_cpu_percent = Enum.sum(Enum.map(containers, & &1.cpu_percent)) / container_count
 
       # Estimate total available resources (rough approximation)
       # Assume 512MB per container
-      max_memory_mb = length(containers) * 512
+      max_memory_mb = container_count * 512
       memory_percentage = calculate_percentage(total_memory_mb, max_memory_mb)
 
       %{
         memory_percentage: memory_percentage,
         cpu_percentage: avg_cpu_percent,
         # Up to 10 containers = 100%
-        container_percentage: min(100, length(containers) * 10)
+        container_percentage: min(100, container_count * 10)
       }
     else
       # Fallback to ResourceManager if available

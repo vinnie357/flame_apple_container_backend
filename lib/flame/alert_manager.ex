@@ -1260,7 +1260,7 @@ defmodule FLAME.AlertManager do
 
   defp get_metric_time_series(metric, window_seconds) do
     case GenServer.call(ContainerMetrics, {:get_time_series, metric, window_seconds}, 5000) do
-      series when is_list(series) and length(series) > 0 -> series
+      series when is_list(series) and series != [] -> series
       _ -> nil
     end
   catch

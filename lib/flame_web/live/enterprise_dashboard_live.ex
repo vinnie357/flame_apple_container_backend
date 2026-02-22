@@ -1414,10 +1414,12 @@ defmodule FlameWeb.EnterpriseDashboardLive do
     queued = Enum.count(jobs, &(&1.state == :queued))
     completed_jobs = Enum.filter(jobs, &(&1.state in [:completed, :failed]))
 
+    completed_count = Enum.count(completed_jobs)
+
     success_rate =
-      if length(completed_jobs) > 0 do
+      if completed_count > 0 do
         successful = Enum.count(completed_jobs, &(&1.state == :completed))
-        round(successful / length(completed_jobs) * 100)
+        round(successful / completed_count * 100)
       else
         100
       end

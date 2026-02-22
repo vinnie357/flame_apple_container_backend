@@ -217,7 +217,7 @@ defmodule FLAME.Security.AuditLogger do
   end
 
   def handle_info(:flush_buffer, state) do
-    if length(state.buffer) > 0 do
+    if state.buffer != [] do
       flush_buffer(state.buffer, state)
       schedule_buffer_flush()
       {:noreply, %{state | buffer: []}}

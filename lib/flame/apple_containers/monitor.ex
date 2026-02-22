@@ -304,7 +304,7 @@ defmodule FLAME.AppleContainers.Monitor do
     alerts = check_alert_conditions(health_results, state.alert_thresholds)
 
     # Handle alerts if any
-    if length(alerts) > 0 do
+    if alerts != [] do
       handle_alerts(alerts, state)
     end
 
@@ -852,18 +852,22 @@ defmodule FLAME.AppleContainers.Monitor do
   end
 
   defp calculate_avg_response_time(metrics) do
-    if length(metrics) > 0 do
+    metrics_count = Enum.count(metrics)
+
+    if metrics_count > 0 do
       total_time = Enum.sum(Enum.map(metrics, &Map.get(&1, :avg_task_time, 0)))
-      total_time / length(metrics)
+      total_time / metrics_count
     else
       0
     end
   end
 
   defp calculate_error_rate(metrics) do
-    if length(metrics) > 0 do
+    metrics_count = Enum.count(metrics)
+
+    if metrics_count > 0 do
       total_success_rate = Enum.sum(Enum.map(metrics, &Map.get(&1, :success_rate, 100)))
-      avg_success_rate = total_success_rate / length(metrics)
+      avg_success_rate = total_success_rate / metrics_count
       (100 - avg_success_rate) / 100
     else
       0

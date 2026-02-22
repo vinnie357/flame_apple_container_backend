@@ -346,7 +346,7 @@ defmodule FLAME.FunctionOptimizer do
 
       optimization_info = %{
         optimization_info
-        | optimization_applied: length(applied_optimizations) > 0,
+        | optimization_applied: applied_optimizations != [],
           optimizations: applied_optimizations,
           function_info: function_info
       }

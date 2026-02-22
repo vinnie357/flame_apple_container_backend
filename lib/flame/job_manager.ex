@@ -691,7 +691,7 @@ defmodule FLAME.JobManager do
 
     case Enum.all?(required_fields, &Map.has_key?(workflow_spec, &1)) do
       true ->
-        if is_list(workflow_spec.steps) and length(workflow_spec.steps) > 0 do
+        if is_list(workflow_spec.steps) and workflow_spec.steps != [] do
           validate_workflow_steps(workflow_spec.steps)
         else
           {:error, :invalid_steps}
@@ -1414,9 +1414,11 @@ defmodule FLAME.JobManager do
   defp calculate_average_execution_time(jobs) do
     completed_jobs = Enum.filter(jobs, &(&1.state == @state_completed))
 
-    if length(completed_jobs) > 0 do
+    completed_count = Enum.count(completed_jobs)
+
+    if completed_count > 0 do
       total_time = Enum.sum(Enum.map(completed_jobs, &calculate_job_duration/1))
-      total_time / length(completed_jobs)
+      total_time / completed_count
     else
       0
     end

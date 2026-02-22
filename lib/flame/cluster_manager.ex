@@ -478,7 +478,7 @@ defmodule FLAME.ClusterManager do
 
     case Enum.all?(required_fields, &Map.has_key?(config, &1)) do
       true ->
-        if is_list(config.endpoints) and length(config.endpoints) > 0 do
+        if is_list(config.endpoints) and config.endpoints != [] do
           :ok
         else
           {:error, :invalid_endpoints}

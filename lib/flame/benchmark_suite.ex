@@ -207,12 +207,14 @@ defmodule FLAME.BenchmarkSuite do
 
     valid_times = Enum.reject(startup_times, &is_nil/1)
 
-    if length(valid_times) > 0 do
+    valid_count = Enum.count(valid_times)
+
+    if valid_count > 0 do
       {:ok,
        %{
          total_iterations: iterations,
-         successful_startups: length(valid_times),
-         failed_startups: iterations - length(valid_times),
+         successful_startups: valid_count,
+         failed_startups: iterations - valid_count,
          min_startup_time: Enum.min(valid_times),
          max_startup_time: Enum.max(valid_times),
          avg_startup_time: calculate_average(valid_times),

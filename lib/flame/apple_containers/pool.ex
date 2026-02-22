@@ -473,8 +473,8 @@ defmodule FLAME.AppleContainers.Pool do
       |> Enum.filter(fn {_id, container} -> container.state == :busy end)
       |> Enum.map(fn {id, _container} -> id end)
 
-    if length(busy_containers) > 0 do
-      Logger.info("Waiting for #{length(busy_containers)} busy containers to finish...")
+    if busy_containers != [] do
+      Logger.info("Waiting for #{Enum.count(busy_containers)} busy containers to finish...")
 
       # Start a timer for the timeout
       timeout_ref = :erlang.start_timer(timeout, self(), :shutdown_timeout)
