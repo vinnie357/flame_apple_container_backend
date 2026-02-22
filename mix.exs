@@ -12,13 +12,16 @@ defmodule FlameAppleContainerBackend.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      preferred_cli_env: [test: :test],
       description: description(),
       package: package(),
       docs: docs(),
       source_url: @source_url,
       homepage_url: @source_url
     ]
+  end
+
+  def cli do
+    [preferred_envs: [test: :test]]
   end
 
   def application do

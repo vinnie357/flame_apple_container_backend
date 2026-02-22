@@ -765,7 +765,10 @@ defmodule FLAME.Security.PolicyEngine do
     # IPv4: convert to 32-bit integers and compare masked values
     ip_int = ip_tuple_to_integer(ip_tuple)
     net_int = ip_tuple_to_integer(network_tuple)
-    mask = if prefix_len == 0, do: 0, else: ~~~((1 <<< (32 - prefix_len)) - 1) &&& 0xFFFFFFFF
+
+    mask =
+      if prefix_len == 0, do: 0, else: Bitwise.bnot((1 <<< (32 - prefix_len)) - 1) &&& 0xFFFFFFFF
+
     (ip_int &&& mask) == (net_int &&& mask)
   end
 
@@ -776,7 +779,9 @@ defmodule FLAME.Security.PolicyEngine do
     net_int = ipv6_tuple_to_integer(network_tuple)
 
     mask =
-      if prefix_len == 0, do: 0, else: ~~~((1 <<< (128 - prefix_len)) - 1) &&& (1 <<< 128) - 1
+      if prefix_len == 0,
+        do: 0,
+        else: Bitwise.bnot((1 <<< (128 - prefix_len)) - 1) &&& (1 <<< 128) - 1
 
     (ip_int &&& mask) == (net_int &&& mask)
   end
