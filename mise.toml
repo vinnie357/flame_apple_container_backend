@@ -4,6 +4,7 @@ _.file = ".env"
 [tools]
 erlang = "27"
 elixir = "1.19.5-otp-27"
+gitleaks = "latest"
 
 [tasks.deps]
 description = "Install dependencies"
@@ -11,7 +12,7 @@ run = "mix deps.get"
 
 [tasks.compile]
 description = "Compile the project"
-run = "mix compile"
+run = "mix compile --warnings-as-errors"
 depends = ["deps"]
 
 [tasks.test]
@@ -23,14 +24,18 @@ depends = ["compile"]
 description = "Format code"
 run = "mix format"
 
-[tasks.format-check]
-description = "Check formatting"
-run = "mix format --check-formatted"
-
 [tasks.lint]
-description = "Run credo linter"
-run = "mix credo --strict"
+description = "Check formatting and lint"
+run = ["mix format --check-formatted", "mix credo --strict"]
 depends = ["compile"]
+
+[tasks.secrets]
+description = "Scan for secrets with gitleaks"
+run = "gitleaks detect --source . -v"
+
+[tasks.precommit]
+description = "Run pre-commit checks (secrets + lint)"
+depends = ["secrets", "lint"]
 
 [tasks.docs]
 description = "Generate documentation"
@@ -43,5 +48,6 @@ run = "mix hex.build"
 depends = ["compile"]
 
 [tasks.ci]
-description = "Run full CI pipeline"
-depends = ["compile", "format-check", "test", "lint"]
+description = "Run CI checks (secrets, lint, compile, test)"
+depends = ["secrets", "lint"]
+run = ["mix compile --warnings-as-errors", "mix test"]
