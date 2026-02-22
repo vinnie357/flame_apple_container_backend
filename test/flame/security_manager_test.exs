@@ -40,8 +40,13 @@ defmodule FLAME.SecurityManagerTest do
 
     on_exit(fn ->
       # Only stop if we started it (not the application-level one)
-      if Process.alive?(security_manager) and security_manager != Process.whereis(SecurityManager) do
-        GenServer.stop(security_manager)
+      try do
+        if Process.alive?(security_manager) and
+             security_manager != Process.whereis(SecurityManager) do
+          GenServer.stop(security_manager)
+        end
+      catch
+        :exit, _ -> :ok
       end
     end)
 
