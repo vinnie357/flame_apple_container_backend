@@ -29,13 +29,16 @@ defmodule FLAME.ContainerHealth do
   }
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     config =
-      case opts do
-        opts when is_list(opts) -> Keyword.get(opts, :config, %{})
+      case clean_opts do
+        clean_opts when is_list(clean_opts) -> Keyword.get(clean_opts, :config, %{})
         _ -> %{}
       end
       |> merge_default_config()
@@ -55,28 +58,28 @@ defmodule FLAME.ContainerHealth do
     {:ok, state}
   end
 
-  def register_container(container_name, health_config \\ %{}) do
-    GenServer.cast(__MODULE__, {:register_container, container_name, health_config})
+  def register_container(container_name, health_config \\ %{}, server \\ __MODULE__) do
+    GenServer.cast(server, {:register_container, container_name, health_config})
   end
 
-  def unregister_container(container_name) do
-    GenServer.cast(__MODULE__, {:unregister_container, container_name})
+  def unregister_container(container_name, server \\ __MODULE__) do
+    GenServer.cast(server, {:unregister_container, container_name})
   end
 
-  def check_container(container_name) do
-    GenServer.call(__MODULE__, {:check_container, container_name})
+  def check_container(container_name, server \\ __MODULE__) do
+    GenServer.call(server, {:check_container, container_name})
   end
 
-  def get_container_status(container_name) do
-    GenServer.call(__MODULE__, {:get_container_status, container_name})
+  def get_container_status(container_name, server \\ __MODULE__) do
+    GenServer.call(server, {:get_container_status, container_name})
   end
 
-  def subscribe_health_events(pid \\ self()) do
-    GenServer.cast(__MODULE__, {:subscribe, pid})
+  def subscribe_health_events(pid \\ self(), server \\ __MODULE__) do
+    GenServer.cast(server, {:subscribe, pid})
   end
 
-  def unsubscribe_health_events(pid \\ self()) do
-    GenServer.cast(__MODULE__, {:unsubscribe, pid})
+  def unsubscribe_health_events(pid \\ self(), server \\ __MODULE__) do
+    GenServer.cast(server, {:unsubscribe, pid})
   end
 
   # GenServer callbacks

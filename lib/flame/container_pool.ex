@@ -34,12 +34,14 @@ defmodule FLAME.ContainerPool do
   }
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    backend_config = Keyword.get(opts, :backend_config, %{}) |> ensure_backend_defaults()
-    pool_config = Keyword.get(opts, :pool_config, %{}) |> merge_default_config()
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    backend_config = Keyword.get(clean_opts, :backend_config, %{}) |> ensure_backend_defaults()
+    pool_config = Keyword.get(clean_opts, :pool_config, %{}) |> merge_default_config()
 
     state = %__MODULE__{
       backend_config: backend_config,
@@ -86,20 +88,20 @@ defmodule FLAME.ContainerPool do
     {:ok, state}
   end
 
-  def get_container(timeout \\ 30_000) do
-    GenServer.call(__MODULE__, :get_container, timeout)
+  def get_container(timeout \\ 30_000, server \\ __MODULE__) do
+    GenServer.call(server, :get_container, timeout)
   end
 
-  def return_container(container_id) do
-    GenServer.cast(__MODULE__, {:return_container, container_id})
+  def return_container(container_id, server \\ __MODULE__) do
+    GenServer.cast(server, {:return_container, container_id})
   end
 
-  def get_pool_status do
-    GenServer.call(__MODULE__, :get_pool_status)
+  def get_pool_status(server \\ __MODULE__) do
+    GenServer.call(server, :get_pool_status)
   end
 
-  def terminate_container(container_id, reason \\ :normal) do
-    GenServer.cast(__MODULE__, {:terminate_container, container_id, reason})
+  def terminate_container(container_id, reason \\ :normal, server \\ __MODULE__) do
+    GenServer.cast(server, {:terminate_container, container_id, reason})
   end
 
   # GenServer callbacks
