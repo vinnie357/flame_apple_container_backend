@@ -50,96 +50,99 @@ defmodule FLAME.ImageManager do
   ## Public API
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   @doc """
   Build a new container image from source.
   """
-  def build_image(build_spec) do
-    GenServer.call(__MODULE__, {:build_image, build_spec}, @build_timeout)
+  def build_image(build_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:build_image, build_spec}, @build_timeout)
   end
 
   @doc """
   Get the status of an image build.
   """
-  def get_build_status(build_id) do
-    GenServer.call(__MODULE__, {:get_build_status, build_id})
+  def get_build_status(build_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_build_status, build_id})
   end
 
   @doc """
   List all available images.
   """
-  def list_images(filters \\ %{}) do
-    GenServer.call(__MODULE__, {:list_images, filters})
+  def list_images(filters \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:list_images, filters})
   end
 
   @doc """
   Get detailed information about a specific image.
   """
-  def get_image_info(image_id) do
-    GenServer.call(__MODULE__, {:get_image_info, image_id})
+  def get_image_info(image_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_image_info, image_id})
   end
 
   @doc """
   Deploy an image to production using blue-green deployment.
   """
-  def deploy_image(image_id, deployment_config \\ %{}) do
-    GenServer.call(__MODULE__, {:deploy_image, image_id, deployment_config}, @build_timeout)
+  def deploy_image(image_id, deployment_config \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:deploy_image, image_id, deployment_config}, @build_timeout)
   end
 
   @doc """
   Rollback to a previous image version.
   """
-  def rollback_deployment(deployment_id, target_image_id \\ nil) do
-    GenServer.call(__MODULE__, {:rollback_deployment, deployment_id, target_image_id})
+  def rollback_deployment(deployment_id, target_image_id \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:rollback_deployment, deployment_id, target_image_id})
   end
 
   @doc """
   Run security scan on an image.
   """
-  def scan_image(image_id) do
-    GenServer.call(__MODULE__, {:scan_image, image_id}, @scan_timeout)
+  def scan_image(image_id, server \\ __MODULE__) do
+    GenServer.call(server, {:scan_image, image_id}, @scan_timeout)
   end
 
   @doc """
   Promote an image through the deployment pipeline stages.
   """
-  def promote_image(image_id, from_stage, to_stage) do
-    GenServer.call(__MODULE__, {:promote_image, image_id, from_stage, to_stage})
+  def promote_image(image_id, from_stage, to_stage, server \\ __MODULE__) do
+    GenServer.call(server, {:promote_image, image_id, from_stage, to_stage})
   end
 
   @doc """
   Clean up old and unused images.
   """
-  def cleanup_images(policy \\ %{}) do
-    GenServer.call(__MODULE__, {:cleanup_images, policy})
+  def cleanup_images(policy \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:cleanup_images, policy})
   end
 
   @doc """
   Get image build and deployment metrics.
   """
-  def get_image_metrics do
-    GenServer.call(__MODULE__, :get_image_metrics)
+  def get_image_metrics(server \\ __MODULE__) do
+    GenServer.call(server, :get_image_metrics)
   end
 
   ## GenServer Callbacks
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     build_config = %{
-      dockerfile_path: Keyword.get(opts, :dockerfile_path, "Dockerfile.flame"),
-      build_context: Keyword.get(opts, :build_context, "."),
-      build_args: Keyword.get(opts, :build_args, %{}),
-      platforms: Keyword.get(opts, :platforms, ["darwin/arm64", "darwin/amd64"]),
-      cache_enabled: Keyword.get(opts, :cache_enabled, true),
-      parallel_builds: Keyword.get(opts, :parallel_builds, 2)
+      dockerfile_path: Keyword.get(clean_opts, :dockerfile_path, "Dockerfile.flame"),
+      build_context: Keyword.get(clean_opts, :build_context, "."),
+      build_args: Keyword.get(clean_opts, :build_args, %{}),
+      platforms: Keyword.get(clean_opts, :platforms, ["darwin/arm64", "darwin/amd64"]),
+      cache_enabled: Keyword.get(clean_opts, :cache_enabled, true),
+      parallel_builds: Keyword.get(clean_opts, :parallel_builds, 2)
     }
 
     state = %__MODULE__{
       images: %{},
       build_queue: :queue.new(),
-      registries: initialize_registries(opts),
-      security_scanner: initialize_security_scanner(opts),
+      registries: initialize_registries(clean_opts),
+      security_scanner: initialize_security_scanner(clean_opts),
       deployment_tracker: %{},
       cache_manager: initialize_cache_manager(opts),
       build_config: build_config

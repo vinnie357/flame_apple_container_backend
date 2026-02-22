@@ -56,11 +56,13 @@ defmodule FLAME.ResourceManager do
   }
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    config = Keyword.get(opts, :config, %{}) |> merge_default_config()
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    config = Keyword.get(clean_opts, :config, %{}) |> merge_default_config()
 
     state = %__MODULE__{
       resource_config: config,
@@ -77,32 +79,32 @@ defmodule FLAME.ResourceManager do
     {:ok, state}
   end
 
-  def register_container(container_id, resource_config \\ %{}) do
-    GenServer.cast(__MODULE__, {:register_container, container_id, resource_config})
+  def register_container(container_id, resource_config \\ %{}, server \\ __MODULE__) do
+    GenServer.cast(server, {:register_container, container_id, resource_config})
   end
 
-  def unregister_container(container_id) do
-    GenServer.cast(__MODULE__, {:unregister_container, container_id})
+  def unregister_container(container_id, server \\ __MODULE__) do
+    GenServer.cast(server, {:unregister_container, container_id})
   end
 
-  def check_resource_availability(resource_requirements) do
-    GenServer.call(__MODULE__, {:check_resource_availability, resource_requirements})
+  def check_resource_availability(resource_requirements, server \\ __MODULE__) do
+    GenServer.call(server, {:check_resource_availability, resource_requirements})
   end
 
-  def get_resource_status do
-    GenServer.call(__MODULE__, :get_resource_status)
+  def get_resource_status(server \\ __MODULE__) do
+    GenServer.call(server, :get_resource_status)
   end
 
-  def get_container_resources(container_id) do
-    GenServer.call(__MODULE__, {:get_container_resources, container_id})
+  def get_container_resources(container_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_container_resources, container_id})
   end
 
-  def enforce_container_limits(container_id) do
-    GenServer.call(__MODULE__, {:enforce_container_limits, container_id})
+  def enforce_container_limits(container_id, server \\ __MODULE__) do
+    GenServer.call(server, {:enforce_container_limits, container_id})
   end
 
-  def trigger_scaling_check do
-    GenServer.cast(__MODULE__, :trigger_scaling_check)
+  def trigger_scaling_check(server \\ __MODULE__) do
+    GenServer.cast(server, :trigger_scaling_check)
   end
 
   # GenServer callbacks

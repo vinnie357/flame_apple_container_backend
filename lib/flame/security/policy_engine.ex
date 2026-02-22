@@ -44,17 +44,20 @@ defmodule FLAME.Security.PolicyEngine do
   ]
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     state = %__MODULE__{
       policies: %{},
       policy_sets: %{},
-      enforcement_config: setup_enforcement_config(opts),
+      enforcement_config: setup_enforcement_config(clean_opts),
       evaluation_cache: %{},
       metrics: initialize_metrics(),
-      hooks: setup_policy_hooks(opts)
+      hooks: setup_policy_hooks(clean_opts)
     }
 
     # Load default policies
@@ -69,48 +72,48 @@ defmodule FLAME.Security.PolicyEngine do
 
   # Public API
 
-  def create_policy(policy_spec) do
-    GenServer.call(__MODULE__, {:create_policy, policy_spec})
+  def create_policy(policy_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:create_policy, policy_spec})
   end
 
-  def update_policy(policy_id, updates) do
-    GenServer.call(__MODULE__, {:update_policy, policy_id, updates})
+  def update_policy(policy_id, updates, server \\ __MODULE__) do
+    GenServer.call(server, {:update_policy, policy_id, updates})
   end
 
-  def delete_policy(policy_id) do
-    GenServer.call(__MODULE__, {:delete_policy, policy_id})
+  def delete_policy(policy_id, server \\ __MODULE__) do
+    GenServer.call(server, {:delete_policy, policy_id})
   end
 
-  def evaluate_policy(policy_id, context) do
-    GenServer.call(__MODULE__, {:evaluate_policy, policy_id, context})
+  def evaluate_policy(policy_id, context, server \\ __MODULE__) do
+    GenServer.call(server, {:evaluate_policy, policy_id, context})
   end
 
-  def evaluate_policy_set(policy_set_id, context) do
-    GenServer.call(__MODULE__, {:evaluate_policy_set, policy_set_id, context})
+  def evaluate_policy_set(policy_set_id, context, server \\ __MODULE__) do
+    GenServer.call(server, {:evaluate_policy_set, policy_set_id, context})
   end
 
-  def enforce_policies(enforcement_point, context) do
-    GenServer.call(__MODULE__, {:enforce_policies, enforcement_point, context})
+  def enforce_policies(enforcement_point, context, server \\ __MODULE__) do
+    GenServer.call(server, {:enforce_policies, enforcement_point, context})
   end
 
-  def list_policies(filter \\ %{}) do
-    GenServer.call(__MODULE__, {:list_policies, filter})
+  def list_policies(filter \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:list_policies, filter})
   end
 
-  def get_policy(policy_id) do
-    GenServer.call(__MODULE__, {:get_policy, policy_id})
+  def get_policy(policy_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_policy, policy_id})
   end
 
-  def create_policy_set(name, policy_ids, logic \\ :all) do
-    GenServer.call(__MODULE__, {:create_policy_set, name, policy_ids, logic})
+  def create_policy_set(name, policy_ids, logic \\ :all, server \\ __MODULE__) do
+    GenServer.call(server, {:create_policy_set, name, policy_ids, logic})
   end
 
-  def test_policy(policy_spec, test_contexts) do
-    GenServer.call(__MODULE__, {:test_policy, policy_spec, test_contexts})
+  def test_policy(policy_spec, test_contexts, server \\ __MODULE__) do
+    GenServer.call(server, {:test_policy, policy_spec, test_contexts})
   end
 
-  def get_policy_metrics(timeframe \\ :hour) do
-    GenServer.call(__MODULE__, {:get_metrics, timeframe})
+  def get_policy_metrics(timeframe \\ :hour, server \\ __MODULE__) do
+    GenServer.call(server, {:get_metrics, timeframe})
   end
 
   # GenServer callbacks

@@ -1,9 +1,11 @@
 defmodule FLAME.SecurityManagerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias FLAME.SecurityManager
 
   setup do
+    name = :"security_manager_#{System.unique_integer([:positive])}"
+
     config = %{
       # 5 seconds for testing
       max_execution_time: 5000,
@@ -31,35 +33,22 @@ defmodule FLAME.SecurityManagerTest do
       ]
     }
 
-    # Use existing SecurityManager or start a new one for testing
-    security_manager =
-      case SecurityManager.start_link(config: config) do
-        {:ok, pid} -> pid
-        {:error, {:already_started, pid}} -> pid
-      end
+    {:ok, pid} = SecurityManager.start_link(config: config, name: name)
 
     on_exit(fn ->
-      # Only stop if we started it (not the application-level one)
       try do
-        if Process.alive?(security_manager) and
-             security_manager != Process.whereis(SecurityManager) do
-          GenServer.stop(security_manager)
-        end
+        if Process.alive?(pid), do: GenServer.stop(pid)
       catch
         :exit, _ -> :ok
       end
     end)
 
-    %{security_manager: security_manager, config: config}
+    %{server: pid, name: name, config: config}
   end
 
   describe "security manager initialization" do
-    test "starts with correct configuration", %{security_manager: security_manager} do
-      # Wait for the SecurityManager to be ready
-      Process.sleep(100)
-
-      # Ensure the global SecurityManager is running by calling our specific instance
-      status = GenServer.call(security_manager, :get_security_status)
+    test "starts with correct configuration", ctx do
+      status = SecurityManager.get_security_status(ctx.server)
 
       assert is_map(status)
       assert Map.has_key?(status, :sandbox_enabled)
@@ -77,16 +66,16 @@ defmodule FLAME.SecurityManagerTest do
   end
 
   describe "function validation" do
-    test "validates safe functions" do
+    test "validates safe functions", ctx do
       safe_function = fn x -> x * 2 end
 
-      result = SecurityManager.validate_function(safe_function, %{user_id: "test"})
+      result = SecurityManager.validate_function(safe_function, %{user_id: "test"}, ctx.server)
 
       # Should either pass validation or handle gracefully
       assert result in [:ok, {:error, :invalid_function_type}]
     end
 
-    test "validates complex functions" do
+    test "validates complex functions", ctx do
       complex_function = fn data ->
         data
         |> Enum.map(&(&1 * 2))
@@ -95,15 +84,16 @@ defmodule FLAME.SecurityManagerTest do
       end
 
       result =
-        SecurityManager.validate_function(complex_function, %{
-          complexity: :high,
-          user_id: "test_user"
-        })
+        SecurityManager.validate_function(
+          complex_function,
+          %{complexity: :high, user_id: "test_user"},
+          ctx.server
+        )
 
       assert result in [:ok, {:error, :invalid_function_type}]
     end
 
-    test "handles function validation errors gracefully" do
+    test "handles function validation errors gracefully", ctx do
       invalid_inputs = [
         nil,
         "not a function",
@@ -112,7 +102,7 @@ defmodule FLAME.SecurityManagerTest do
       ]
 
       Enum.each(invalid_inputs, fn invalid_input ->
-        result = SecurityManager.validate_function(invalid_input)
+        result = SecurityManager.validate_function(invalid_input, %{}, ctx.server)
 
         case result do
           :ok -> assert true
@@ -124,10 +114,10 @@ defmodule FLAME.SecurityManagerTest do
   end
 
   describe "safe execution" do
-    test "executes safe functions" do
+    test "executes safe functions", ctx do
       safe_function = fn -> 2 + 2 end
 
-      result = SecurityManager.execute_safely(safe_function, %{test: true}, 1000)
+      result = SecurityManager.execute_safely(safe_function, %{test: true}, 1000, ctx.server)
 
       case result do
         {:ok, 4} ->
@@ -142,7 +132,7 @@ defmodule FLAME.SecurityManagerTest do
       end
     end
 
-    test "handles function execution timeout" do
+    test "handles function execution timeout", ctx do
       slow_function = fn ->
         # Sleep for 100ms
         Process.sleep(100)
@@ -150,7 +140,7 @@ defmodule FLAME.SecurityManagerTest do
       end
 
       # Execute with very short timeout
-      result = SecurityManager.execute_safely(slow_function, %{}, 50)
+      result = SecurityManager.execute_safely(slow_function, %{}, 50, ctx.server)
 
       case result do
         {:ok, :completed} ->
@@ -170,82 +160,64 @@ defmodule FLAME.SecurityManagerTest do
       end
     end
 
-    test "handles function execution errors" do
+    test "handles function execution errors", ctx do
       error_function = fn -> raise ArgumentError, "test error" end
 
-      # Handle the case where SecurityManager might be shut down during full test suite
-      try do
-        result = SecurityManager.execute_safely(error_function, %{}, 1000)
+      result = SecurityManager.execute_safely(error_function, %{}, 1000, ctx.server)
 
-        case result do
-          {:error, %ArgumentError{}} ->
-            assert true
-
-          {:error, _other_reason} ->
-            assert true
-
-          other ->
-            flunk("Unexpected result: #{inspect(other)}")
-        end
-      catch
-        :exit, {:shutdown, _} ->
-          # SecurityManager was shut down during test suite - this is acceptable in test environment
+      case result do
+        {:error, %ArgumentError{}} ->
           assert true
 
-        :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - this is acceptable in test environment
+        {:error, _other_reason} ->
           assert true
+
+        other ->
+          flunk("Unexpected result: #{inspect(other)}")
       end
     end
 
-    test "monitors resource usage during execution" do
+    test "monitors resource usage during execution", ctx do
       memory_intensive_function = fn ->
         # Create some data structures
         data = Enum.map(1..1000, fn i -> {i, i * i, "value_#{i}"} end)
         Enum.sum(Enum.map(data, fn {i, _, _} -> i end))
       end
 
-      try do
-        result =
-          SecurityManager.execute_safely(
-            memory_intensive_function,
-            %{
-              resource_monitoring: true
-            },
-            5000
-          )
+      result =
+        SecurityManager.execute_safely(
+          memory_intensive_function,
+          %{resource_monitoring: true},
+          5000,
+          ctx.server
+        )
 
-        case result do
-          {:ok, result_value} when is_integer(result_value) ->
-            assert true
-
-          {:error, reason} ->
-            # Could fail due to resource limits or other reasons
-            assert is_atom(reason) or is_tuple(reason)
-
-          other ->
-            flunk("Unexpected result: #{inspect(other)}")
-        end
-      catch
-        :exit, {:shutdown, _} ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
+      case result do
+        {:ok, result_value} when is_integer(result_value) ->
           assert true
 
-        :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
+        {:error, reason} ->
+          # Could fail due to resource limits or other reasons
+          assert is_atom(reason) or is_tuple(reason)
+
+        other ->
+          flunk("Unexpected result: #{inspect(other)}")
       end
     end
   end
 
   describe "audit logging" do
-    test "logs security events" do
+    test "logs security events", ctx do
       # Test audit logging functionality
-      SecurityManager.audit_log(:test_event, %{
-        user_id: "test_user",
-        action: "function_execution",
-        timestamp: System.system_time(:millisecond)
-      })
+      SecurityManager.audit_log(
+        :test_event,
+        %{
+          user_id: "test_user",
+          action: "function_execution",
+          timestamp: System.system_time(:millisecond)
+        },
+        ctx.server
+      )
 
       # Allow time for async logging
       Process.sleep(50)
@@ -254,14 +226,15 @@ defmodule FLAME.SecurityManagerTest do
       assert :ok == :ok
     end
 
-    test "logs function validation events" do
+    test "logs function validation events", ctx do
       test_function = fn x -> x + 1 end
 
       # This should trigger audit logging
-      SecurityManager.validate_function(test_function, %{
-        source: "test",
-        user_id: "audit_test_user"
-      })
+      SecurityManager.validate_function(
+        test_function,
+        %{source: "test", user_id: "audit_test_user"},
+        ctx.server
+      )
 
       # Allow time for logging
       Process.sleep(50)
@@ -269,14 +242,16 @@ defmodule FLAME.SecurityManagerTest do
       assert :ok == :ok
     end
 
-    test "logs execution events" do
+    test "logs execution events", ctx do
       test_function = fn -> "audit test result" end
 
       # This should trigger execution audit logs
-      SecurityManager.execute_safely(test_function, %{
-        audit_context: "test_execution",
-        user_id: "execution_test_user"
-      })
+      SecurityManager.execute_safely(
+        test_function,
+        %{audit_context: "test_execution", user_id: "execution_test_user"},
+        30_000,
+        ctx.server
+      )
 
       # Allow time for logging
       Process.sleep(100)
@@ -286,9 +261,9 @@ defmodule FLAME.SecurityManagerTest do
   end
 
   describe "resource management" do
-    test "enforces execution time limits" do
+    test "enforces execution time limits", ctx do
       # This test verifies that time limit logic exists
-      status = SecurityManager.get_security_status()
+      status = SecurityManager.get_security_status(ctx.server)
 
       assert is_map(status.resource_limits)
       assert Map.has_key?(status.resource_limits, :max_execution_time)
@@ -296,108 +271,51 @@ defmodule FLAME.SecurityManagerTest do
       assert status.resource_limits.max_execution_time > 0
     end
 
-    test "enforces memory limits" do
-      status = SecurityManager.get_security_status()
+    test "enforces memory limits", ctx do
+      status = SecurityManager.get_security_status(ctx.server)
 
       assert Map.has_key?(status.resource_limits, :max_memory_mb)
       assert is_integer(status.resource_limits.max_memory_mb)
       assert status.resource_limits.max_memory_mb > 0
     end
 
-    test "enforces CPU limits" do
-      try do
-        status = SecurityManager.get_security_status()
+    test "enforces CPU limits", ctx do
+      status = SecurityManager.get_security_status(ctx.server)
 
-        assert Map.has_key?(status.resource_limits, :max_cpu_percent)
-        assert is_integer(status.resource_limits.max_cpu_percent)
-        assert status.resource_limits.max_cpu_percent > 0
-        assert status.resource_limits.max_cpu_percent <= 100
-      catch
-        :exit, {:shutdown, _} ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
-
-        :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
-
-        :exit, {:noproc, _} ->
-          # SecurityManager GenServer not available - acceptable in test environment
-          assert true
-
-        :exit, :noproc ->
-          # SecurityManager GenServer not available - acceptable in test environment
-          assert true
-      end
+      assert Map.has_key?(status.resource_limits, :max_cpu_percent)
+      assert is_integer(status.resource_limits.max_cpu_percent)
+      assert status.resource_limits.max_cpu_percent > 0
+      assert status.resource_limits.max_cpu_percent <= 100
     end
   end
 
   describe "security configuration" do
-    test "respects sandbox settings" do
-      status = SecurityManager.get_security_status()
+    test "respects sandbox settings", ctx do
+      status = SecurityManager.get_security_status(ctx.server)
 
       # Should reflect configuration
       assert is_boolean(status.sandbox_enabled)
     end
 
-    test "tracks allowed modules" do
-      try do
-        status = SecurityManager.get_security_status()
+    test "tracks allowed modules", ctx do
+      status = SecurityManager.get_security_status(ctx.server)
 
-        assert status.allowed_modules_count > 0
-        # Should have the modules we configured
-        assert status.allowed_modules_count >= 5
-      catch
-        :exit, {:shutdown, _} ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
-
-        :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
-
-        :exit, {:noproc, _} ->
-          # SecurityManager GenServer not available - acceptable in test environment
-          assert true
-
-        :exit, :noproc ->
-          # SecurityManager GenServer not available - acceptable in test environment
-          assert true
-      end
+      assert status.allowed_modules_count > 0
+      # Should have the modules we configured
+      assert status.allowed_modules_count >= 5
     end
 
-    test "tracks restricted functions" do
-      try do
-        status = SecurityManager.get_security_status()
+    test "tracks restricted functions", ctx do
+      status = SecurityManager.get_security_status(ctx.server)
 
-        assert status.restricted_functions_count > 0
-        # Should have the restrictions we configured
-        assert status.restricted_functions_count >= 2
-      catch
-        :exit, {:shutdown, _} ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
-
-        :exit, :shutdown ->
-          # SecurityManager was shut down during test suite - acceptable in test environment
-          assert true
-
-        :exit, {:noproc, _} ->
-          # SecurityManager GenServer not available - acceptable in test environment
-          assert true
-
-        :exit, :noproc ->
-          # SecurityManager GenServer not available - acceptable in test environment
-          assert true
-      end
+      assert status.restricted_functions_count > 0
+      # Should have the restrictions we configured
+      assert status.restricted_functions_count >= 2
     end
   end
 
   describe "error handling and edge cases" do
-    test "handles concurrent executions" do
-      # Add a delay before starting to allow other tests to complete
-      Process.sleep(100)
-
+    test "handles concurrent executions", ctx do
       test_function = fn i ->
         # Very short sleep to be minimally intrusive
         Process.sleep(2)
@@ -408,28 +326,12 @@ defmodule FLAME.SecurityManagerTest do
       tasks =
         Enum.map(1..2, fn i ->
           Task.async(fn ->
-            # Add staggered delays to spread out requests
-            Process.sleep(i * 20)
-
-            try do
-              SecurityManager.execute_safely(fn -> test_function.(i) end, %{task_id: i}, 10_000)
-            catch
-              :exit, {:shutdown, _} ->
-                # SecurityManager was shut down during test suite - acceptable in test environment
-                {:ok, :shutdown}
-
-              :exit, :shutdown ->
-                # SecurityManager was shut down during test suite - acceptable in test environment
-                {:ok, :shutdown}
-
-              :exit, {:noproc, _} ->
-                # SecurityManager GenServer not available - acceptable in test environment
-                {:ok, :unavailable}
-
-              :exit, :noproc ->
-                # SecurityManager GenServer not available - acceptable in test environment
-                {:ok, :unavailable}
-            end
+            SecurityManager.execute_safely(
+              fn -> test_function.(i) end,
+              %{task_id: i},
+              10_000,
+              ctx.server
+            )
           end)
         end)
 
@@ -439,39 +341,27 @@ defmodule FLAME.SecurityManagerTest do
       # All should complete (successfully or with expected errors)
       assert length(results) == 2
 
-      # Allow for any result since this is about not crashing, not specific behavior
       Enum.each(results, fn result ->
         case result do
-          {:ok, _} ->
-            assert true
-
-          {:error, _} ->
-            assert true
-
-          other ->
-            # In a stressed environment, we might get unexpected results
-            # Log but don't fail the test
-            IO.puts("Unexpected concurrent result: #{inspect(other)}")
-            assert true
+          {:ok, _} -> assert true
+          {:error, _} -> assert true
+          other -> flunk("Unexpected concurrent result: #{inspect(other)}")
         end
       end)
-
-      # Add a delay after completion to allow SecurityManager to recover
-      Process.sleep(100)
     end
 
-    test "handles system stress" do
+    test "handles system stress", ctx do
       # Execute many security operations quickly
       Enum.each(1..20, fn i ->
-        SecurityManager.audit_log(:stress_test, %{iteration: i})
+        SecurityManager.audit_log(:stress_test, %{iteration: i}, ctx.server)
       end)
 
       # System should remain responsive
-      status = SecurityManager.get_security_status()
+      status = SecurityManager.get_security_status(ctx.server)
       assert is_map(status)
     end
 
-    test "recovers from errors gracefully" do
+    test "recovers from errors gracefully", ctx do
       # Test with various error conditions
       error_functions = [
         fn -> exit(:test_exit) end,
@@ -480,7 +370,7 @@ defmodule FLAME.SecurityManagerTest do
       ]
 
       Enum.each(error_functions, fn error_fn ->
-        result = SecurityManager.execute_safely(error_fn, %{})
+        result = SecurityManager.execute_safely(error_fn, %{}, 30_000, ctx.server)
 
         case result do
           {:error, _} -> assert true
@@ -489,7 +379,7 @@ defmodule FLAME.SecurityManagerTest do
       end)
 
       # Security manager should still be responsive
-      status = SecurityManager.get_security_status()
+      status = SecurityManager.get_security_status(ctx.server)
       assert is_map(status)
     end
   end

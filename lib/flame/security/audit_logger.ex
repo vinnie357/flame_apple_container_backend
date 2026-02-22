@@ -58,14 +58,16 @@ defmodule FLAME.Security.AuditLogger do
   ]
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    storage_backends = Keyword.get(opts, :storage_backends, [:file, :database])
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    storage_backends = Keyword.get(clean_opts, :storage_backends, [:file, :database])
     # 7 years default
-    retention_days = Keyword.get(opts, :retention_days, 2555)
-    _encryption_enabled = Keyword.get(opts, :encryption_enabled, true)
+    retention_days = Keyword.get(clean_opts, :retention_days, 2555)
+    _encryption_enabled = Keyword.get(clean_opts, :encryption_enabled, true)
 
     state = %__MODULE__{
       storage_backends: storage_backends,
@@ -100,48 +102,48 @@ defmodule FLAME.Security.AuditLogger do
 
   # Public API
 
-  def log_auth_event(event_data) do
-    GenServer.cast(__MODULE__, {:log_event, :authentication, event_data})
+  def log_auth_event(event_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_event, :authentication, event_data})
   end
 
-  def log_access_event(event_data) do
-    GenServer.cast(__MODULE__, {:log_event, :resource_access, event_data})
+  def log_access_event(event_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_event, :resource_access, event_data})
   end
 
-  def log_modification_event(event_data) do
-    GenServer.cast(__MODULE__, {:log_event, :data_modification, event_data})
+  def log_modification_event(event_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_event, :data_modification, event_data})
   end
 
-  def log_security_event(event_data) do
-    GenServer.cast(__MODULE__, {:log_event, :security, event_data})
+  def log_security_event(event_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_event, :security, event_data})
   end
 
-  def log_system_event(event_data) do
-    GenServer.cast(__MODULE__, {:log_event, :system, event_data})
+  def log_system_event(event_data, server \\ __MODULE__) do
+    GenServer.cast(server, {:log_event, :system, event_data})
   end
 
-  def search_audit_logs(criteria) do
-    GenServer.call(__MODULE__, {:search_logs, criteria})
+  def search_audit_logs(criteria, server \\ __MODULE__) do
+    GenServer.call(server, {:search_logs, criteria})
   end
 
-  def export_audit_logs(format, criteria \\ %{}) do
-    GenServer.call(__MODULE__, {:export_logs, format, criteria})
+  def export_audit_logs(format, criteria \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:export_logs, format, criteria})
   end
 
-  def get_compliance_report(framework, date_range) do
-    GenServer.call(__MODULE__, {:compliance_report, framework, date_range})
+  def get_compliance_report(framework, date_range, server \\ __MODULE__) do
+    GenServer.call(server, {:compliance_report, framework, date_range})
   end
 
-  def get_audit_stats(timeframe \\ :day) do
-    GenServer.call(__MODULE__, {:audit_stats, timeframe})
+  def get_audit_stats(timeframe \\ :day, server \\ __MODULE__) do
+    GenServer.call(server, {:audit_stats, timeframe})
   end
 
-  def configure_retention(category, days) do
-    GenServer.call(__MODULE__, {:configure_retention, category, days})
+  def configure_retention(category, days, server \\ __MODULE__) do
+    GenServer.call(server, {:configure_retention, category, days})
   end
 
-  def add_alert_rule(rule) do
-    GenServer.call(__MODULE__, {:add_alert_rule, rule})
+  def add_alert_rule(rule, server \\ __MODULE__) do
+    GenServer.call(server, {:add_alert_rule, rule})
   end
 
   # GenServer callbacks

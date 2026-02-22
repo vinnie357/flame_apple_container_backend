@@ -140,11 +140,13 @@ defmodule FLAME.Security.RBAC do
   ]
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    auth_adapter = Keyword.get(opts, :auth_adapter)
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    auth_adapter = Keyword.get(clean_opts, :auth_adapter)
 
     state = %__MODULE__{
       users: %{},
@@ -161,40 +163,40 @@ defmodule FLAME.Security.RBAC do
 
   # Public API
 
-  def authenticate_user(username, password, opts \\ []) do
-    GenServer.call(__MODULE__, {:authenticate, username, password, opts})
+  def authenticate_user(username, password, opts \\ [], server \\ __MODULE__) do
+    GenServer.call(server, {:authenticate, username, password, opts})
   end
 
-  def create_session(user_id, metadata \\ %{}) do
-    GenServer.call(__MODULE__, {:create_session, user_id, metadata})
+  def create_session(user_id, metadata \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:create_session, user_id, metadata})
   end
 
-  def authorize(session_id, resource, action, context \\ %{}) do
-    GenServer.call(__MODULE__, {:authorize, session_id, resource, action, context})
+  def authorize(session_id, resource, action, context \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:authorize, session_id, resource, action, context})
   end
 
-  def assign_role(user_id, role, context \\ %{}) do
-    GenServer.call(__MODULE__, {:assign_role, user_id, role, context})
+  def assign_role(user_id, role, context \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:assign_role, user_id, role, context})
   end
 
-  def revoke_role(user_id, role, context \\ %{}) do
-    GenServer.call(__MODULE__, {:revoke_role, user_id, role, context})
+  def revoke_role(user_id, role, context \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:revoke_role, user_id, role, context})
   end
 
-  def get_user_permissions(user_id) do
-    GenServer.call(__MODULE__, {:get_permissions, user_id})
+  def get_user_permissions(user_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_permissions, user_id})
   end
 
-  def create_policy(policy_name, policy_spec) do
-    GenServer.call(__MODULE__, {:create_policy, policy_name, policy_spec})
+  def create_policy(policy_name, policy_spec, server \\ __MODULE__) do
+    GenServer.call(server, {:create_policy, policy_name, policy_spec})
   end
 
-  def list_sessions(filter \\ %{}) do
-    GenServer.call(__MODULE__, {:list_sessions, filter})
+  def list_sessions(filter \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:list_sessions, filter})
   end
 
-  def revoke_session(session_id, reason \\ "manual_revocation") do
-    GenServer.call(__MODULE__, {:revoke_session, session_id, reason})
+  def revoke_session(session_id, reason \\ "manual_revocation", server \\ __MODULE__) do
+    GenServer.call(server, {:revoke_session, session_id, reason})
   end
 
   # GenServer callbacks
@@ -516,16 +518,16 @@ defmodule FLAME.Security.RBAC do
 
   # Utility functions for integration
 
-  def require_permission(session_id, resource, action, context \\ %{}) do
-    case authorize(session_id, resource, action, context) do
+  def require_permission(session_id, resource, action, context \\ %{}, server \\ __MODULE__) do
+    case authorize(session_id, resource, action, context, server) do
       {:ok, true} -> :ok
       {:ok, false} -> {:error, :unauthorized}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def with_authorization(session_id, resource, action, context \\ %{}, fun) do
-    case require_permission(session_id, resource, action, context) do
+  def with_authorization(session_id, resource, action, context \\ %{}, server \\ __MODULE__, fun) do
+    case require_permission(session_id, resource, action, context, server) do
       :ok -> fun.()
       error -> error
     end

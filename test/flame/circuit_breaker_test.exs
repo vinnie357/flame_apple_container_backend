@@ -1,9 +1,11 @@
 defmodule FLAME.CircuitBreakerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias FLAME.CircuitBreaker
 
   setup do
+    name = :"circuit_breaker_#{System.unique_integer([:positive])}"
+
     config = %{
       failure_threshold: 3,
       # 1 second for testing
@@ -18,12 +20,16 @@ defmodule FLAME.CircuitBreakerTest do
 
     {:ok, circuit_breaker} =
       CircuitBreaker.start_link(
-        name: :test_circuit_breaker,
+        name: name,
         config: config
       )
 
     on_exit(fn ->
-      if Process.alive?(circuit_breaker), do: GenServer.stop(circuit_breaker)
+      try do
+        if Process.alive?(circuit_breaker), do: GenServer.stop(circuit_breaker)
+      catch
+        :exit, _ -> :ok
+      end
     end)
 
     %{circuit_breaker: circuit_breaker, config: config}

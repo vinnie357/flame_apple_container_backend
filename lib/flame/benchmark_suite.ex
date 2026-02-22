@@ -33,11 +33,13 @@ defmodule FLAME.BenchmarkSuite do
   }
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    config = Keyword.get(opts, :config, %{}) |> merge_default_config()
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    config = Keyword.get(clean_opts, :config, %{}) |> merge_default_config()
 
     state = %__MODULE__{
       benchmark_config: config,
@@ -50,20 +52,20 @@ defmodule FLAME.BenchmarkSuite do
     {:ok, state}
   end
 
-  def run_full_benchmark_suite(output_format \\ :console) do
-    GenServer.call(__MODULE__, {:run_full_suite, output_format}, :infinity)
+  def run_full_benchmark_suite(output_format \\ :console, server \\ __MODULE__) do
+    GenServer.call(server, {:run_full_suite, output_format}, :infinity)
   end
 
-  def run_benchmark(benchmark_name, opts \\ []) do
-    GenServer.call(__MODULE__, {:run_benchmark, benchmark_name, opts}, :infinity)
+  def run_benchmark(benchmark_name, opts \\ [], server \\ __MODULE__) do
+    GenServer.call(server, {:run_benchmark, benchmark_name, opts}, :infinity)
   end
 
-  def get_benchmark_results(benchmark_name \\ nil) do
-    GenServer.call(__MODULE__, {:get_results, benchmark_name})
+  def get_benchmark_results(benchmark_name \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:get_results, benchmark_name})
   end
 
-  def compare_with_backend(other_backend, scenarios \\ nil) do
-    GenServer.call(__MODULE__, {:compare_backends, other_backend, scenarios}, :infinity)
+  def compare_with_backend(other_backend, scenarios \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:compare_backends, other_backend, scenarios}, :infinity)
   end
 
   # GenServer callbacks

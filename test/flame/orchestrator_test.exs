@@ -1,9 +1,11 @@
 defmodule FLAME.OrchestratorTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias FLAME.Orchestrator
 
   setup do
+    name = :"orchestrator_#{System.unique_integer([:positive])}"
+
     config = %{
       max_cluster_size: 5,
       # 10 seconds for testing
@@ -13,25 +15,22 @@ defmodule FLAME.OrchestratorTest do
       enable_workflow_orchestration: true
     }
 
-    {:ok, orchestrator} = Orchestrator.start_link(config: config)
+    {:ok, pid} = Orchestrator.start_link(config: config, name: name)
 
     on_exit(fn ->
-      if Process.alive?(orchestrator) do
-        try do
-          GenServer.stop(orchestrator)
-        catch
-          # Process already dead, ignore
-          :exit, _ -> :ok
-        end
+      try do
+        if Process.alive?(pid), do: GenServer.stop(pid)
+      catch
+        :exit, _ -> :ok
       end
     end)
 
-    %{orchestrator: orchestrator, config: config}
+    %{server: pid, name: name, config: config}
   end
 
   describe "orchestrator initialization" do
-    test "starts with correct configuration" do
-      status = Orchestrator.get_cluster_status()
+    test "starts with correct configuration", ctx do
+      status = Orchestrator.get_cluster_status(nil, ctx.server)
 
       assert is_map(status)
       assert Map.has_key?(status, :active_clusters)
@@ -47,7 +46,7 @@ defmodule FLAME.OrchestratorTest do
   end
 
   describe "cluster management" do
-    test "validates cluster specifications" do
+    test "validates cluster specifications", ctx do
       valid_cluster_spec = %{
         name: "test-cluster",
         size: 3,
@@ -57,14 +56,14 @@ defmodule FLAME.OrchestratorTest do
 
       # This will likely fail in test environment due to no actual containers
       # but should validate the specification format
-      result = Orchestrator.create_cluster(valid_cluster_spec)
+      result = Orchestrator.create_cluster(valid_cluster_spec, ctx.server)
 
       case result do
         {:ok, cluster_id} ->
           assert is_binary(cluster_id)
 
           # Clean up
-          Orchestrator.destroy_cluster(cluster_id)
+          Orchestrator.destroy_cluster(cluster_id, ctx.server)
 
         {:error, reason} ->
           # Expected in test environment
@@ -76,7 +75,7 @@ defmodule FLAME.OrchestratorTest do
       end
     end
 
-    test "rejects invalid cluster specifications" do
+    test "rejects invalid cluster specifications", ctx do
       invalid_specs = [
         # Invalid size
         %{name: "invalid", size: 0},
@@ -87,7 +86,7 @@ defmodule FLAME.OrchestratorTest do
       ]
 
       Enum.each(invalid_specs, fn spec ->
-        result = Orchestrator.create_cluster(spec)
+        result = Orchestrator.create_cluster(spec, ctx.server)
 
         case result do
           {:error, {:invalid_cluster_spec, _reason}} ->
@@ -103,7 +102,7 @@ defmodule FLAME.OrchestratorTest do
       end)
     end
 
-    test "tracks cluster lifecycle" do
+    test "tracks cluster lifecycle", ctx do
       cluster_spec = %{
         name: "lifecycle-test-cluster",
         size: 2,
@@ -111,20 +110,20 @@ defmodule FLAME.OrchestratorTest do
       }
 
       # Attempt to create cluster
-      result = Orchestrator.create_cluster(cluster_spec)
+      result = Orchestrator.create_cluster(cluster_spec, ctx.server)
 
       case result do
         {:ok, cluster_id} ->
           # Check cluster exists
-          status = Orchestrator.get_cluster_status(cluster_id)
+          status = Orchestrator.get_cluster_status(cluster_id, ctx.server)
           assert is_map(status)
 
           # Destroy cluster
-          destroy_result = Orchestrator.destroy_cluster(cluster_id)
+          destroy_result = Orchestrator.destroy_cluster(cluster_id, ctx.server)
           assert destroy_result == :ok
 
           # Verify cluster is gone
-          destroyed_status = Orchestrator.get_cluster_status(cluster_id)
+          destroyed_status = Orchestrator.get_cluster_status(cluster_id, ctx.server)
           assert is_nil(destroyed_status)
 
         {:error, _reason} ->
@@ -133,14 +132,14 @@ defmodule FLAME.OrchestratorTest do
       end
     end
 
-    test "handles cluster destruction of non-existent clusters" do
-      result = Orchestrator.destroy_cluster("non-existent-cluster-id")
+    test "handles cluster destruction of non-existent clusters", ctx do
+      result = Orchestrator.destroy_cluster("non-existent-cluster-id", ctx.server)
       assert {:error, :cluster_not_found} == result
     end
   end
 
   describe "task scheduling" do
-    test "validates task specifications" do
+    test "validates task specifications", ctx do
       valid_task_spec = %{
         function: fn x -> x * 2 end,
         args: [5],
@@ -149,7 +148,7 @@ defmodule FLAME.OrchestratorTest do
       }
 
       # Will likely fail due to no clusters in test environment
-      result = Orchestrator.schedule_task(valid_task_spec)
+      result = Orchestrator.schedule_task(valid_task_spec, ctx.server)
 
       case result do
         {:ok, task_id, execution_info} ->
@@ -168,13 +167,13 @@ defmodule FLAME.OrchestratorTest do
       end
     end
 
-    test "handles task scheduling without available clusters" do
+    test "handles task scheduling without available clusters", ctx do
       task_spec = %{
         function: fn -> :test_result end,
         args: []
       }
 
-      result = Orchestrator.schedule_task(task_spec)
+      result = Orchestrator.schedule_task(task_spec, ctx.server)
 
       # Should fail gracefully when no clusters are available
       case result do
@@ -193,7 +192,7 @@ defmodule FLAME.OrchestratorTest do
   end
 
   describe "workflow orchestration" do
-    test "validates workflow specifications" do
+    test "validates workflow specifications", ctx do
       valid_workflow = %{
         name: "test-workflow",
         steps: [
@@ -203,7 +202,7 @@ defmodule FLAME.OrchestratorTest do
         ]
       }
 
-      result = Orchestrator.schedule_workflow(valid_workflow)
+      result = Orchestrator.schedule_workflow(valid_workflow, ctx.server)
 
       case result do
         {:ok, workflow_id} ->
@@ -219,7 +218,7 @@ defmodule FLAME.OrchestratorTest do
       end
     end
 
-    test "rejects invalid workflow specifications" do
+    test "rejects invalid workflow specifications", ctx do
       invalid_workflows = [
         # Empty name and steps
         %{name: "", steps: []},
@@ -232,7 +231,7 @@ defmodule FLAME.OrchestratorTest do
       ]
 
       Enum.each(invalid_workflows, fn workflow ->
-        result = Orchestrator.schedule_workflow(workflow)
+        result = Orchestrator.schedule_workflow(workflow, ctx.server)
 
         case result do
           {:error, {:invalid_workflow_spec, _reason}} ->
@@ -248,7 +247,7 @@ defmodule FLAME.OrchestratorTest do
       end)
     end
 
-    test "handles workflow step dependencies" do
+    test "handles workflow step dependencies", ctx do
       workflow_with_deps = %{
         name: "dependency-test-workflow",
         steps: [
@@ -258,7 +257,7 @@ defmodule FLAME.OrchestratorTest do
         ]
       }
 
-      result = Orchestrator.schedule_workflow(workflow_with_deps)
+      result = Orchestrator.schedule_workflow(workflow_with_deps, ctx.server)
 
       case result do
         {:ok, workflow_id} ->
@@ -272,7 +271,7 @@ defmodule FLAME.OrchestratorTest do
   end
 
   describe "affinity and anti-affinity rules" do
-    test "updates affinity rules" do
+    test "updates affinity rules", ctx do
       new_rules = %{
         data_locality: false,
         cpu_anti_affinity: true,
@@ -281,7 +280,7 @@ defmodule FLAME.OrchestratorTest do
       }
 
       # Should not crash when updating rules
-      Orchestrator.update_affinity_rules(new_rules)
+      Orchestrator.update_affinity_rules(new_rules, ctx.server)
 
       # Allow time for async update
       Process.sleep(50)
@@ -289,7 +288,7 @@ defmodule FLAME.OrchestratorTest do
       assert :ok == :ok
     end
 
-    test "applies affinity rules in task scheduling" do
+    test "applies affinity rules in task scheduling", ctx do
       # Test that affinity rules are considered (even if no clusters exist)
       task_with_affinity = %{
         function: fn -> :cpu_intensive_task end,
@@ -298,7 +297,7 @@ defmodule FLAME.OrchestratorTest do
         resource_requirements: %{cpu_percent: 80}
       }
 
-      result = Orchestrator.schedule_task(task_with_affinity)
+      result = Orchestrator.schedule_task(task_with_affinity, ctx.server)
 
       # Should attempt to apply affinity rules (even if it fails due to no clusters)
       case result do
@@ -315,21 +314,21 @@ defmodule FLAME.OrchestratorTest do
   end
 
   describe "load balancing" do
-    test "supports different load balancing strategies" do
-      status = Orchestrator.get_cluster_status()
+    test "supports different load balancing strategies", ctx do
+      status = Orchestrator.get_cluster_status(nil, ctx.server)
 
       # Should have a task distribution strategy configured
       assert status.task_distribution_strategy in [:round_robin, :least_loaded, :random]
     end
 
-    test "handles load balancing with no available containers" do
+    test "handles load balancing with no available containers", ctx do
       # This tests the load balancing logic when no containers are available
       task_spec = %{
         function: fn -> :load_balance_test end,
         args: []
       }
 
-      result = Orchestrator.schedule_task(task_spec)
+      result = Orchestrator.schedule_task(task_spec, ctx.server)
 
       # Should fail gracefully with appropriate error
       case result do
@@ -347,8 +346,8 @@ defmodule FLAME.OrchestratorTest do
   end
 
   describe "orchestrator status and monitoring" do
-    test "provides comprehensive status information" do
-      status = Orchestrator.get_cluster_status()
+    test "provides comprehensive status information", ctx do
+      status = Orchestrator.get_cluster_status(nil, ctx.server)
 
       required_fields = [
         :active_clusters,
@@ -370,8 +369,8 @@ defmodule FLAME.OrchestratorTest do
       assert is_list(status.cluster_summary)
     end
 
-    test "tracks cluster summary information" do
-      status = Orchestrator.get_cluster_status()
+    test "tracks cluster summary information", ctx do
+      status = Orchestrator.get_cluster_status(nil, ctx.server)
 
       # Cluster summary should be a list
       assert is_list(status.cluster_summary)
@@ -388,7 +387,7 @@ defmodule FLAME.OrchestratorTest do
   end
 
   describe "error handling and resilience" do
-    test "handles concurrent cluster operations" do
+    test "handles concurrent cluster operations", ctx do
       cluster_specs =
         Enum.map(1..3, fn i ->
           %{
@@ -401,7 +400,7 @@ defmodule FLAME.OrchestratorTest do
       # Create clusters concurrently
       tasks =
         Enum.map(cluster_specs, fn spec ->
-          Task.async(fn -> Orchestrator.create_cluster(spec) end)
+          Task.async(fn -> Orchestrator.create_cluster(spec, ctx.server) end)
         end)
 
       results = Task.await_many(tasks, 5000)
@@ -413,7 +412,7 @@ defmodule FLAME.OrchestratorTest do
         case result do
           {:ok, cluster_id} when is_binary(cluster_id) ->
             # Success - clean up
-            Orchestrator.destroy_cluster(cluster_id)
+            Orchestrator.destroy_cluster(cluster_id, ctx.server)
 
           {:error, _reason} ->
             # Expected in test environment
@@ -422,12 +421,12 @@ defmodule FLAME.OrchestratorTest do
       end)
     end
 
-    test "recovers from system errors gracefully" do
+    test "recovers from system errors gracefully", ctx do
       # Test various error conditions
       error_operations = [
-        fn -> Orchestrator.destroy_cluster(nil) end,
-        fn -> Orchestrator.schedule_task(%{invalid: :spec}) end,
-        fn -> Orchestrator.schedule_workflow(%{}) end
+        fn -> Orchestrator.destroy_cluster(nil, ctx.server) end,
+        fn -> Orchestrator.schedule_task(%{invalid: :spec}, ctx.server) end,
+        fn -> Orchestrator.schedule_workflow(%{}, ctx.server) end
       ]
 
       Enum.each(error_operations, fn operation ->
@@ -446,18 +445,18 @@ defmodule FLAME.OrchestratorTest do
       end)
 
       # Orchestrator should remain responsive
-      status = Orchestrator.get_cluster_status()
+      status = Orchestrator.get_cluster_status(nil, ctx.server)
       assert is_map(status)
     end
 
-    test "handles high-volume operations" do
+    test "handles high-volume operations", ctx do
       # Perform many status requests quickly
       Enum.each(1..50, fn _i ->
-        Orchestrator.get_cluster_status()
+        Orchestrator.get_cluster_status(nil, ctx.server)
       end)
 
       # System should remain responsive
-      final_status = Orchestrator.get_cluster_status()
+      final_status = Orchestrator.get_cluster_status(nil, ctx.server)
       assert is_map(final_status)
     end
   end

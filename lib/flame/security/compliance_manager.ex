@@ -101,13 +101,15 @@ defmodule FLAME.Security.ComplianceManager do
   ]
 
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
-    active_frameworks = Keyword.get(opts, :frameworks, ["SOC2_TYPE2"])
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    active_frameworks = Keyword.get(clean_opts, :frameworks, ["SOC2_TYPE2"])
     # hours
-    assessment_frequency = Keyword.get(opts, :assessment_frequency, 24)
+    assessment_frequency = Keyword.get(clean_opts, :assessment_frequency, 24)
 
     state = %__MODULE__{
       active_frameworks: active_frameworks,
@@ -116,7 +118,7 @@ defmodule FLAME.Security.ComplianceManager do
       control_evidence: %{},
       remediation_tasks: [],
       assessment_history: [],
-      notification_config: setup_notification_config(opts)
+      notification_config: setup_notification_config(clean_opts)
     }
 
     # Initialize compliance status for active frameworks
@@ -131,36 +133,36 @@ defmodule FLAME.Security.ComplianceManager do
 
   # Public API
 
-  def run_compliance_assessment(framework \\ nil) do
-    GenServer.call(__MODULE__, {:run_assessment, framework}, 30_000)
+  def run_compliance_assessment(framework \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:run_assessment, framework}, 30_000)
   end
 
-  def get_compliance_status(framework \\ nil) do
-    GenServer.call(__MODULE__, {:get_status, framework})
+  def get_compliance_status(framework \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:get_status, framework})
   end
 
-  def generate_compliance_report(framework, options \\ %{}) do
-    GenServer.call(__MODULE__, {:generate_report, framework, options}, 60_000)
+  def generate_compliance_report(framework, options \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:generate_report, framework, options}, 60_000)
   end
 
-  def add_control_evidence(framework, control_id, evidence) do
-    GenServer.call(__MODULE__, {:add_evidence, framework, control_id, evidence})
+  def add_control_evidence(framework, control_id, evidence, server \\ __MODULE__) do
+    GenServer.call(server, {:add_evidence, framework, control_id, evidence})
   end
 
-  def create_remediation_task(issue) do
-    GenServer.call(__MODULE__, {:create_remediation, issue})
+  def create_remediation_task(issue, server \\ __MODULE__) do
+    GenServer.call(server, {:create_remediation, issue})
   end
 
-  def get_remediation_tasks(status \\ nil) do
-    GenServer.call(__MODULE__, {:get_remediations, status})
+  def get_remediation_tasks(status \\ nil, server \\ __MODULE__) do
+    GenServer.call(server, {:get_remediations, status})
   end
 
-  def configure_framework(framework, config) do
-    GenServer.call(__MODULE__, {:configure_framework, framework, config})
+  def configure_framework(framework, config, server \\ __MODULE__) do
+    GenServer.call(server, {:configure_framework, framework, config})
   end
 
-  def schedule_assessment(framework, schedule) do
-    GenServer.call(__MODULE__, {:schedule_assessment, framework, schedule})
+  def schedule_assessment(framework, schedule, server \\ __MODULE__) do
+    GenServer.call(server, {:schedule_assessment, framework, schedule})
   end
 
   # GenServer callbacks

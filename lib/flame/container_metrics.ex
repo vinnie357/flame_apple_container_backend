@@ -28,13 +28,16 @@ defmodule FLAME.ContainerMetrics do
   ]
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+
     config =
-      case opts do
-        opts when is_list(opts) -> Keyword.get(opts, :config, %{})
+      case clean_opts do
+        clean_opts when is_list(clean_opts) -> Keyword.get(clean_opts, :config, %{})
         _ -> %{}
       end
 
@@ -160,16 +163,16 @@ defmodule FLAME.ContainerMetrics do
     })
   end
 
-  def get_metrics_summary do
-    GenServer.call(__MODULE__, :get_metrics_summary)
+  def get_metrics_summary(server \\ __MODULE__) do
+    GenServer.call(server, :get_metrics_summary)
   end
 
-  def get_container_metrics(container_id) do
-    GenServer.call(__MODULE__, {:get_container_metrics, container_id})
+  def get_container_metrics(container_id, server \\ __MODULE__) do
+    GenServer.call(server, {:get_container_metrics, container_id})
   end
 
-  def export_prometheus_metrics do
-    GenServer.call(__MODULE__, :export_prometheus_metrics)
+  def export_prometheus_metrics(server \\ __MODULE__) do
+    GenServer.call(server, :export_prometheus_metrics)
   end
 
   # GenServer callbacks
