@@ -79,14 +79,16 @@ defmodule FLAME.SecurityManager do
   # Public API
 
   def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    name = Keyword.get(opts, :name, __MODULE__)
+    GenServer.start_link(__MODULE__, opts, name: name)
   end
 
   def init(opts) do
     # Trap exits so we can handle task failures gracefully
     Process.flag(:trap_exit, true)
 
-    opts_map = if is_list(opts), do: Map.new(opts), else: opts
+    clean_opts = if is_list(opts), do: Keyword.delete(opts, :name), else: opts
+    opts_map = if is_list(clean_opts), do: Map.new(clean_opts), else: clean_opts
 
     config =
       @default_config
@@ -107,22 +109,22 @@ defmodule FLAME.SecurityManager do
     {:ok, state}
   end
 
-  def validate_function(function, metadata \\ %{}) do
-    GenServer.call(__MODULE__, {:validate_function, function, metadata})
+  def validate_function(function, metadata \\ %{}, server \\ __MODULE__) do
+    GenServer.call(server, {:validate_function, function, metadata})
   end
 
-  def execute_safely(function, metadata \\ %{}, timeout \\ 30_000) do
+  def execute_safely(function, metadata \\ %{}, timeout \\ 30_000, server \\ __MODULE__) do
     # Use a GenServer timeout that's longer than function timeout to allow proper handling
     genserver_timeout = max(timeout + 1_000, 5_000)
-    GenServer.call(__MODULE__, {:execute_safely, function, metadata, timeout}, genserver_timeout)
+    GenServer.call(server, {:execute_safely, function, metadata, timeout}, genserver_timeout)
   end
 
-  def audit_log(event, metadata) do
-    GenServer.cast(__MODULE__, {:audit_log, event, metadata})
+  def audit_log(event, metadata, server \\ __MODULE__) do
+    GenServer.cast(server, {:audit_log, event, metadata})
   end
 
-  def get_security_status do
-    GenServer.call(__MODULE__, :get_security_status)
+  def get_security_status(server \\ __MODULE__) do
+    GenServer.call(server, :get_security_status)
   end
 
   # GenServer callbacks
