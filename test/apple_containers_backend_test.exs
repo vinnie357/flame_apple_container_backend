@@ -37,7 +37,12 @@ defmodule FLAME.AppleContainersBackendTest do
       ]
 
       assert {:ok, backend} = AppleContainersBackend.init(opts)
-      assert backend.config.volumes == ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
+
+      assert backend.config.volumes == [
+               "/host/.claude:/home/elixir/.claude:ro",
+               "/data:/app/data"
+             ]
+
       assert backend.volumes == ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
     end
   end
