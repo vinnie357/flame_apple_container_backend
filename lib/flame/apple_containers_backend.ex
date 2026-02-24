@@ -864,36 +864,26 @@ defmodule FLAME.AppleContainersBackend do
   end
 
   defp execute_code_in_container(container_name, script_content) do
-    # Create a temporary script file to execute in the container
-    script_path = "/tmp/flame_task_#{System.system_time(:microsecond)}.sh"
+    # Execute script content directly in container via sh -c
+    # This avoids the issue of creating a temp file on the host
+    # and trying to access it from inside the container
+    case CLI.adapter().exec_in_container(container_name, ["sh", "-c", script_content]) do
+      {output, 0} ->
+        Logger.info("Container execution completed successfully")
+        Logger.debug("Container output: #{output}")
 
-    try do
-      # Write script to temporary file
-      File.write!(script_path, script_content)
-      File.chmod!(script_path, 0o755)
+        # Try to parse the result from container output
+        result = parse_container_output(output)
+        {:ok, self(), make_ref(), result}
 
-      # Execute script in container
-      case CLI.adapter().exec_in_container(container_name, ["sh", script_path]) do
-        {output, 0} ->
-          Logger.info("Container execution completed successfully")
-          Logger.debug("Container output: #{output}")
-
-          # Try to parse the result from container output
-          result = parse_container_output(output)
-          {:ok, self(), make_ref(), result}
-
-        {error_output, exit_code} ->
-          Logger.error("Container execution failed with exit code #{exit_code}: #{error_output}")
-          {:error, {:container_execution_failed, exit_code, error_output}}
-      end
-    rescue
-      e ->
-        Logger.error("Failed to execute in container: #{inspect(e)}")
-        {:error, {:execution_setup_failed, e}}
-    after
-      # Clean up temporary script file
-      File.rm(script_path)
+      {error_output, exit_code} ->
+        Logger.error("Container execution failed with exit code #{exit_code}: #{error_output}")
+        {:error, {:container_execution_failed, exit_code, error_output}}
     end
+  rescue
+    e ->
+      Logger.error("Failed to execute in container: #{inspect(e)}")
+      {:error, {:execution_setup_failed, e}}
   end
 
   defp parse_container_output(output) do
