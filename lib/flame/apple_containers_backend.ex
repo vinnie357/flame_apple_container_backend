@@ -413,11 +413,11 @@ defmodule FLAME.AppleContainersBackend do
     # First, check if container name is already in use
     ensure_no_existing_container(container_name)
 
-    cmd = build_container_run_command(backend, container_name, node_name)
+    args = build_container_run_command(backend, container_name, node_name)
 
-    Logger.debug("Starting container with command: #{inspect(cmd)}")
+    Logger.debug("Starting container with args: #{inspect(args)}")
 
-    case CLI.adapter().run_container(tl(cmd)) do
+    case CLI.adapter().run_container(args) do
       {output, 0} ->
         handle_container_start_success(container_name, output)
 
@@ -474,9 +474,8 @@ defmodule FLAME.AppleContainersBackend do
     # Volume mounts for credentials and config (e.g., ~/.claude:/home/elixir/.claude:ro)
     volume_args = build_volume_args(backend.volumes)
 
+    # Return args only - CLI adapter will prepend "container run"
     [
-      "container",
-      "run",
       "--name",
       container_name,
       "--detach",
