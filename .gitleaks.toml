@@ -1,0 +1,10 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks
+
+title = "flame_apple_container_backend gitleaks config"
+
+# Allowlist historical findings from pre-cleanup commit (946f39f)
+# These were dev-only Phoenix secret_key_base values, now removed from code.
+[allowlist]
+  description = "Known false positives from pre-cleanup commits"
+  commits = ["946f39f34940a5eaa4c8d2593c843292d55c0ce0"]

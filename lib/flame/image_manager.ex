@@ -14,6 +14,8 @@ defmodule FLAME.ImageManager do
   use GenServer
   require Logger
 
+  alias FLAME.AppleContainers.CLI
+
   alias FLAME.AlertManager
 
   defstruct [
@@ -678,7 +680,7 @@ defmodule FLAME.ImageManager do
       _path ->
         Logger.info("Building image #{image_tag} with `container` CLI")
 
-        case System.cmd("container", args, stderr_to_stdout: true) do
+        case CLI.adapter().build_image(args) do
           {output, 0} ->
             build_logs =
               output

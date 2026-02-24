@@ -9,6 +9,8 @@ defmodule FLAME.ContainerHealth do
   use GenServer
   require Logger
 
+  alias FLAME.AppleContainers.CLI
+
   defstruct [
     :health_checks,
     :check_interval,
@@ -230,8 +232,7 @@ defmodule FLAME.ContainerHealth do
   end
 
   defp check_container_running(container_name) do
-    case System.cmd("container", [
-           "list",
+    case CLI.adapter().list_containers([
            "--filter",
            "name=#{container_name}",
            "--format",
@@ -244,9 +245,7 @@ defmodule FLAME.ContainerHealth do
   end
 
   defp check_erlang_distribution(container_name) do
-    case System.cmd("container", ["exec", container_name, "epmd", "-names"],
-           stderr_to_stdout: true
-         ) do
+    case CLI.adapter().exec_in_container(container_name, ["epmd", "-names"]) do
       {output, 0} ->
         if String.contains?(output, "name ") do
           :ok
@@ -262,7 +261,7 @@ defmodule FLAME.ContainerHealth do
   defp check_node_connectivity(container_name) do
     # This is a simplified check - in a real implementation you'd want to
     # verify the actual node connection
-    case System.cmd("container", ["exec", container_name, "ps", "aux"], stderr_to_stdout: true) do
+    case CLI.adapter().exec_in_container(container_name, ["ps", "aux"]) do
       {output, 0} ->
         if String.contains?(output, "beam.smp") or String.contains?(output, "erl") do
           :ok
