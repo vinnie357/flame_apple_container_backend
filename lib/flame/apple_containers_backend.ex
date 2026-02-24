@@ -32,7 +32,8 @@ defmodule FLAME.AppleContainersBackend do
     :mode,
     :network_name,
     :subnet,
-    :enable_clustering
+    :enable_clustering,
+    :volumes
   ]
 
   @impl true
@@ -54,7 +55,9 @@ defmodule FLAME.AppleContainersBackend do
       # Container 0.6.0 networking support
       network_name: Keyword.get(opts, :network_name, "flame-cluster-net"),
       subnet: Keyword.get(opts, :subnet),
-      enable_clustering: Keyword.get(opts, :enable_clustering, false)
+      enable_clustering: Keyword.get(opts, :enable_clustering, false),
+      # Volume mounts for passing credentials/config into containers
+      volumes: Keyword.get(opts, :volumes, [])
     }
 
     # Initialize supporting systems based on mode
@@ -87,7 +90,8 @@ defmodule FLAME.AppleContainersBackend do
       mode: config.mode,
       network_name: config.network_name,
       subnet: config.subnet,
-      enable_clustering: config.enable_clustering
+      enable_clustering: config.enable_clustering,
+      volumes: config.volumes
     }
 
     Logger.info(
@@ -467,6 +471,9 @@ defmodule FLAME.AppleContainersBackend do
         []
       end
 
+    # Volume mounts for credentials and config (e.g., ~/.claude:/home/elixir/.claude:ro)
+    volume_args = build_volume_args(backend.volumes)
+
     [
       "container",
       "run",
@@ -474,7 +481,16 @@ defmodule FLAME.AppleContainersBackend do
       container_name,
       "--detach",
       "--rm"
-    ] ++ env_vars ++ network_args ++ resource_limits ++ [backend.config.image]
+    ] ++ env_vars ++ network_args ++ volume_args ++ resource_limits ++ [backend.config.image]
+  end
+
+  defp build_volume_args(nil), do: []
+  defp build_volume_args([]), do: []
+
+  defp build_volume_args(volumes) when is_list(volumes) do
+    Enum.flat_map(volumes, fn volume_spec ->
+      ["--volume", volume_spec]
+    end)
   end
 
   defp handle_container_start_success(container_name, output) do

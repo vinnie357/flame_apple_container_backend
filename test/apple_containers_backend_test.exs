@@ -26,6 +26,19 @@ defmodule FLAME.AppleContainersBackendTest do
       assert backend.config.dns_domain in ["flame.local", "test.local"]
       assert backend.config.container_prefix == "flame-worker"
       assert backend.config.erlang_cookie == "test_cookie"
+      assert backend.config.volumes == []
+    end
+
+    test "initializes with volume mounts" do
+      opts = [
+        erlang_cookie: "test_cookie",
+        image: "test-image:latest",
+        volumes: ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
+      ]
+
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.config.volumes == ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
+      assert backend.volumes == ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
     end
   end
 
