@@ -94,7 +94,8 @@ defmodule FLAME.AppleContainersBackend do
       network_name: config.network_name,
       subnet: config.subnet,
       enable_clustering: config.enable_clustering,
-      volumes: config.volumes
+      volumes: config.volumes,
+      env: config.env
     }
 
     Logger.info(
