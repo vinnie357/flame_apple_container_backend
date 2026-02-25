@@ -17,8 +17,7 @@ defmodule FLAME.AppleContainers.MonitorTest do
     {:ok, backend} =
       AppleContainersBackend.init(
         image: "test-worker:latest",
-        dns_domain: "test.local",
-        mode: :test
+        dns_domain: "test.local"
       )
 
     {:ok, pool} =

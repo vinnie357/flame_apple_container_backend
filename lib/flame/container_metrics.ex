@@ -376,9 +376,9 @@ defmodule FLAME.ContainerMetrics do
 
   defp update_pool_status_metrics(store, measurements, metadata) do
     Map.put(store, :pool_status, %{
-      warm_pool_size: measurements.warm_pool_size || 0,
-      active_containers: measurements.active_containers || 0,
-      total_containers: measurements.total_containers || 0,
+      warm_pool_size: Map.get(measurements, :warm_pool_size, 0),
+      active_containers: Map.get(measurements, :active_containers, 0),
+      total_containers: Map.get(measurements, :total_containers, 0),
       last_updated: metadata.timestamp
     })
   end

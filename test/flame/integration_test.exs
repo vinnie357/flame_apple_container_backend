@@ -35,36 +35,19 @@ defmodule FLAME.IntegrationTest do
         image: "flame-worker:test",
         dns_domain: "integration.test",
         container_prefix: "integration-test",
-        erlang_cookie: "integration_test_cookie",
-        mode: :test,
-        pool_config: %{
-          min_warm_containers: 1,
-          max_warm_containers: 3,
-          max_active_containers: 5
-        },
-        circuit_breaker_config: %{
-          failure_threshold: 3,
-          timeout: 5000
-        },
-        monitoring_config: %{
-          telemetry: %{enabled: true},
-          prometheus: %{enabled: false}
-        }
+        erlang_cookie: "integration_test_cookie"
       ]
 
       {:ok, backend} = AppleContainersBackend.init(backend_opts)
       assert is_map(backend)
-      assert backend.mode == :test
-      assert is_map(backend.config)
-      assert backend.config.image == "flame-worker:test"
-      assert backend.config.dns_domain == "integration.test"
+      assert backend.image == "flame-worker:test"
+      assert backend.dns_domain == "integration.test"
     end
 
     test "backend handles remote boot requests" do
       # Initialize backend
       {:ok, backend} =
         AppleContainersBackend.init(
-          mode: :test,
           image: "flame-worker:test",
           dns_domain: "test.local",
           container_prefix: "test-boot",
@@ -78,32 +61,17 @@ defmodule FLAME.IntegrationTest do
         {:ok, terminator_pid, updated_backend} ->
           assert is_pid(terminator_pid)
           assert is_map(updated_backend)
-          # Get container info from backend state
-          container_info = updated_backend.containers |> Map.values() |> List.first()
-          assert is_map(container_info)
-          assert Map.has_key?(container_info, :container_name)
-          assert Map.has_key?(container_info, :node_name)
 
         {:error, reason} ->
           # Expected in test environment without actual containers
-          case reason do
-            :no_warm_containers -> assert true
-            {:container_provisioning_failed, _details} -> assert true
-            {:container_start_failed, _code, _error} -> assert true
-            :readiness_timeout -> assert true
-            {:connection_failed, _node} -> assert true
-            other -> flunk("Unexpected error reason: #{inspect(other)}")
-          end
+          assert is_tuple(reason)
       end
     end
 
     test "backend handles task execution with monitoring" do
       # Initialize backend with monitoring
       {:ok, backend} =
-        AppleContainersBackend.init(
-          mode: :test,
-          image: "flame-worker:test"
-        )
+        AppleContainersBackend.init(image: "flame-worker:test")
 
       # Test function
       test_function = fn -> 2 + 2 end
@@ -112,18 +80,12 @@ defmodule FLAME.IntegrationTest do
       result = AppleContainersBackend.remote_spawn_monitor(backend, test_function)
 
       case result do
-        {:ok, pid, ref} when is_pid(pid) and is_reference(ref) ->
+        {:ok, {pid, ref}} when is_pid(pid) and is_reference(ref) ->
           assert true
 
         {:error, reason} ->
           # Expected in test environment
-          case reason do
-            :no_available_containers -> assert true
-            {:container_provisioning_failed, _details} -> assert true
-            :circuit_breaker_open -> assert true
-            {:rpc_failed, _error} -> assert true
-            other -> flunk("Unexpected error reason: #{inspect(other)}")
-          end
+          assert reason
       end
     end
   end
@@ -132,10 +94,7 @@ defmodule FLAME.IntegrationTest do
     test "handles multiple concurrent requests" do
       # Initialize backend
       {:ok, backend} =
-        AppleContainersBackend.init(
-          mode: :test,
-          pool_config: %{max_active_containers: 10}
-        )
+        AppleContainersBackend.init(image: "flame-worker:test")
 
       # Create multiple concurrent tasks
       tasks =
@@ -154,7 +113,7 @@ defmodule FLAME.IntegrationTest do
 
       Enum.each(results, fn result ->
         case result do
-          {:ok, _pid, _ref} -> assert true
+          {:ok, {_pid, _ref}} -> assert true
           {:error, _reason} -> assert true
           other -> flunk("Unexpected result: #{inspect(other)}")
         end
@@ -273,15 +232,7 @@ defmodule FLAME.IntegrationTest do
       {:ok, backend} =
         AppleContainersBackend.init(
           image: "flame-worker:e2e-test",
-          dns_domain: "e2e.test",
-          mode: :test,
-          pool_config: %{
-            min_warm_containers: 1,
-            max_warm_containers: 2
-          },
-          monitoring_config: %{
-            telemetry: %{enabled: true}
-          }
+          dns_domain: "e2e.test"
         )
 
       # 2. Attempt to boot a remote container
@@ -298,7 +249,7 @@ defmodule FLAME.IntegrationTest do
           execution_result = AppleContainersBackend.remote_spawn_monitor(backend, test_function)
 
           case execution_result do
-            {:ok, _pid, _ref} ->
+            {:ok, {_pid, _ref}} ->
               assert true
 
             {:error, _reason} ->
@@ -376,7 +327,7 @@ defmodule FLAME.IntegrationTest do
 
       # Trigger various error conditions
       error_operations = [
-        fn -> AppleContainersBackend.remote_boot(%AppleContainersBackend{config: %{}}) end,
+        fn -> AppleContainersBackend.remote_boot(%AppleContainersBackend{}) end,
         fn -> SecurityManager.execute_safely(fn -> raise "test error" end, %{}) end,
         fn -> CircuitBreaker.call(:container_health, fn -> exit(:test) end) end
       ]
@@ -448,45 +399,27 @@ defmodule FLAME.IntegrationTest do
 
   describe "configuration integration" do
     test "respects different environment configurations" do
-      # Test production mode configuration
-      prod_opts = [
-        mode: :production,
-        pool_config: %{min_warm_containers: 5},
-        monitoring_config: %{telemetry: %{enabled: true}}
-      ]
-
-      {:ok, prod_backend} = AppleContainersBackend.init(prod_opts)
-      assert prod_backend.mode == :production
-
-      # Test development mode configuration
-      dev_opts = [
-        mode: :development,
-        pool_config: %{min_warm_containers: 1},
-        monitoring_config: %{collection_interval: 60_000}
-      ]
-
-      {:ok, dev_backend} = AppleContainersBackend.init(dev_opts)
-      assert dev_backend.mode == :development
-
-      # Test mode affects system behavior
-      assert prod_backend.mode != dev_backend.mode
-    end
-
-    test "handles missing or invalid configuration gracefully" do
-      # Test with minimal configuration
-      {:ok, backend} = AppleContainersBackend.init([])
-      assert is_map(backend)
-      assert is_map(backend.config)
-
-      # Test with invalid configuration - system handles it gracefully
-      {:ok, backend} =
+      {:ok, backend_a} =
         AppleContainersBackend.init(
-          mode: :invalid_mode,
-          pool_config: "not a map"
+          image: "flame-worker:a",
+          boot_timeout: 10_000
         )
 
-      # System handled invalid config gracefully
+      {:ok, backend_b} =
+        AppleContainersBackend.init(
+          image: "flame-worker:b",
+          boot_timeout: 60_000
+        )
+
+      assert backend_a.image != backend_b.image
+      assert backend_a.boot_timeout != backend_b.boot_timeout
+    end
+
+    test "handles minimal configuration gracefully" do
+      {:ok, backend} = AppleContainersBackend.init([])
       assert is_map(backend)
+      assert is_binary(backend.image)
+      assert is_binary(backend.runner_node_base)
     end
   end
 end

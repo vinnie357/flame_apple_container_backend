@@ -185,15 +185,15 @@ defmodule FLAME.BenchmarkSuite do
 
         start_time = System.monotonic_time(:millisecond)
 
-        case FLAME.AppleContainersBackend.remote_boot(%FLAME.AppleContainersBackend{
-               config: %{
-                 image: "flame-worker:test",
-                 dns_domain: "test.local",
-                 container_prefix: "benchmark-test",
-                 erlang_cookie: "benchmark_cookie"
-               },
-               mode: :test
-             }) do
+        {:ok, backend} =
+          FLAME.AppleContainersBackend.init(
+            image: "flame-worker:test",
+            dns_domain: "test.local",
+            container_prefix: "benchmark-test",
+            erlang_cookie: "benchmark_cookie"
+          )
+
+        case FLAME.AppleContainersBackend.remote_boot(backend) do
           {:ok, _pid, _ref} ->
             end_time = System.monotonic_time(:millisecond)
             startup_time = end_time - start_time

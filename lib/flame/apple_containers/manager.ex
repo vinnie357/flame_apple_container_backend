@@ -296,8 +296,7 @@ defmodule FLAME.AppleContainers.Manager do
       image: config.image,
       dns_domain: config.dns_domain,
       container_prefix: config.container_prefix,
-      erlang_cookie: config.erlang_cookie,
-      mode: if(Mix.env() == :test, do: :test, else: :production)
+      erlang_cookie: config.erlang_cookie
     ]
 
     {:ok, backend} = AppleContainersBackend.init(backend_opts)

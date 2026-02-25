@@ -189,10 +189,7 @@ defmodule FLAME.AppleContainers.IntegrationTest do
 
       # Start all components
       {:ok, backend} =
-        AppleContainersBackend.init(
-          image: "test-worker:latest",
-          mode: :test
-        )
+        AppleContainersBackend.init(image: "test-worker:latest")
 
       {:ok, pool} =
         Pool.start_link(

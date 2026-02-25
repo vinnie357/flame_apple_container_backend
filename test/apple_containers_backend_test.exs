@@ -5,11 +5,9 @@ defmodule FLAME.AppleContainersBackendTest do
   alias FLAME.AppleContainersBackend
 
   setup do
-    # Configure mock CLI adapter for this test process
     original = Application.get_env(:flame_apple_container_backend, :cli_adapter)
     Application.put_env(:flame_apple_container_backend, :cli_adapter, CLIMock)
 
-    # Set default DNS mock responses
     CLIMock.set_responses(%{
       list_dns_domains: {"flame.local\ntest.local\n", 0},
       get_default_dns_domain: {"flame.local\n", 0},
@@ -27,144 +25,167 @@ defmodule FLAME.AppleContainersBackendTest do
     :ok
   end
 
-  describe "backend initialization" do
-    test "initializes with default configuration" do
-      opts = [
-        erlang_cookie: "test_cookie",
-        image: "test-image:latest"
-      ]
+  @base_opts [
+    erlang_cookie: "test_cookie",
+    image: "test-image:latest"
+  ]
 
-      assert {:ok, backend} = AppleContainersBackend.init(opts)
-      assert backend.config.image == "test-image:latest"
-      assert backend.config.dns_domain == "flame.local"
-      assert backend.config.erlang_cookie == "test_cookie"
+  describe "init/1" do
+    test "initializes with default configuration" do
+      assert {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      assert backend.image == "test-image:latest"
+      assert backend.dns_domain == "flame.local"
+      assert backend.erlang_cookie == "test_cookie"
+      assert is_reference(backend.parent_ref)
+      assert is_binary(backend.encoded_parent)
+      assert is_binary(backend.runner_node_base)
     end
 
     test "uses default values when not provided" do
-      opts = []
-
-      assert {:ok, backend} = AppleContainersBackend.init(opts)
-      assert backend.config.image == "flame-worker:latest"
-      assert backend.config.dns_domain == "flame.local"
-      assert backend.config.container_prefix == "flame-worker"
-      assert backend.config.erlang_cookie == "test_cookie"
-      assert backend.config.volumes == []
+      assert {:ok, backend} = AppleContainersBackend.init([])
+      assert backend.image == "flame-worker:latest"
+      assert backend.container_prefix == "flame-worker"
+      assert backend.boot_timeout == 30_000
+      assert backend.volumes == []
+      assert backend.env == []
     end
 
     test "initializes with volume mounts" do
-      opts = [
-        erlang_cookie: "test_cookie",
-        image: "test-image:latest",
-        volumes: ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
-      ]
+      opts =
+        @base_opts ++
+          [volumes: ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]]
 
       assert {:ok, backend} = AppleContainersBackend.init(opts)
 
-      assert backend.config.volumes == [
+      assert backend.volumes == [
                "/host/.claude:/home/elixir/.claude:ro",
                "/data:/app/data"
              ]
+    end
 
-      assert backend.volumes == ["/host/.claude:/home/elixir/.claude:ro", "/data:/app/data"]
+    test "initializes with extra env vars" do
+      opts = @base_opts ++ [env: [{"API_KEY", "secret123"}]]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.env == [{"API_KEY", "secret123"}]
     end
 
     test "falls back when requested domain not available" do
       CLIMock.set_response(:list_dns_domains, {"other.local\n", 0})
 
-      opts = [dns_domain: "missing.local"]
-
+      opts = @base_opts ++ [dns_domain: "missing.local"]
       assert {:ok, backend} = AppleContainersBackend.init(opts)
-      # Should fall back to first available domain
-      assert backend.config.dns_domain == "other.local"
+      assert backend.dns_domain == "other.local"
     end
 
-    test "falls back to default domain when dns list fails" do
+    test "falls back to requested domain when dns list fails" do
       CLIMock.set_response(:list_dns_domains, {"error: not available", 1})
-      CLIMock.set_response(:get_default_dns_domain, {"fallback.local\n", 0})
 
-      opts = [dns_domain: "flame.local"]
-
+      opts = @base_opts ++ [dns_domain: "flame.local"]
       assert {:ok, backend} = AppleContainersBackend.init(opts)
-      # Should use requested domain as fallback when list fails
-      assert backend.config.dns_domain == "flame.local"
+      assert backend.dns_domain == "flame.local"
+    end
+
+    test "encoded_parent contains FLAME.Parent data" do
+      assert {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      decoded = backend.encoded_parent |> Base.decode64!() |> :erlang.binary_to_term()
+      assert decoded.backend == AppleContainersBackend
+      assert decoded.node_base == backend.runner_node_base
+      assert decoded.host_env == "FLAME_HOST"
+      assert decoded.pid == self()
+      assert decoded.ref == backend.parent_ref
     end
   end
 
-  describe "container lifecycle" do
-    test "provisions container in test mode" do
-      # Test mode executes functions locally, no container provisioning
-      opts = [mode: :test, dns_domain: "test.local"]
+  describe "remote_boot/1" do
+    test "starts container and waits for terminator callback" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      parent_ref = backend.parent_ref
+      test_pid = self()
 
-      {:ok, backend} = AppleContainersBackend.init(opts)
+      CLIMock.set_response(:run_container, fn ->
+        # Simulate remote Terminator connecting back
+        spawn(fn ->
+          send(test_pid, {parent_ref, {:remote_up, self()}})
+          Process.sleep(:infinity)
+        end)
 
-      # remote_boot in non-test mode provisions a real container;
-      # in test mode it falls through to direct provisioning which calls CLI.
-      # Set mock responses for the provisioning path.
-      # Mock the full container provisioning flow:
-      # 1. inspect (check exists) -> not found is fine, verify_running -> success
-      # 2. run -> success
-      # 3. inspect (verify running) -> success
-      # 4. exec (readiness check) -> success
-      # Since mock returns same response per callback, use a counter for inspect
-      call_count = :counters.new(1, [:atomics])
+        {"container-id-123\n", 0}
+      end)
 
-      CLIMock.set_responses(%{
-        inspect_container: fn ->
-          count = :counters.get(call_count, 1)
-          :counters.add(call_count, 1, 1)
-
-          if count == 0 do
-            # First call: check_container_exists -> not found
-            {"", 1}
-          else
-            # Subsequent calls: verify_container_running -> running
-            {"{\"State\": \"running\"}", 0}
-          end
-        end,
-        run_container: {"container-id-123\n", 0},
-        exec_in_container: {"Elixir 1.19.5\n", 0}
-      })
-
-      assert {:ok, terminator_pid, updated_backend} =
-               AppleContainersBackend.remote_boot(backend)
-
+      assert {:ok, terminator_pid, new_state} = AppleContainersBackend.remote_boot(backend)
       assert is_pid(terminator_pid)
-      assert Process.alive?(terminator_pid)
+      assert new_state.remote_terminator_pid == terminator_pid
+      assert new_state.runner_node_name == node(terminator_pid)
+    end
 
-      assert map_size(updated_backend.containers) == 1
-      container_info = updated_backend.containers |> Map.values() |> List.first()
+    test "returns error when container fails to start" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
 
-      assert is_binary(container_info.container_name)
-      assert is_atom(container_info.node_name)
-      assert container_info.status == :running
-      assert is_integer(container_info.started_at)
+      CLIMock.set_response(:run_container, {"image not found\n", 125})
+
+      assert {:error, {:container_start_failed, 125, _}} =
+               AppleContainersBackend.remote_boot(backend)
+    end
+
+    test "exits on timeout when terminator never connects" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts ++ [boot_timeout: 100])
+
+      # remote_boot will exit(:timeout) when no {:remote_up, _} arrives.
+      # Must set up mocks inside spawned process since CLIMock uses process dictionary.
+      pid =
+        spawn(fn ->
+          CLIMock.set_responses(%{
+            run_container: {"container-id-123\n", 0},
+            stop_container: {"", 0}
+          })
+
+          AppleContainersBackend.remote_boot(backend)
+        end)
+
+      ref = Process.monitor(pid)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :timeout}, 500
     end
   end
 
-  describe "task execution" do
-    test "spawns processes in test mode" do
-      {:ok, backend} = AppleContainersBackend.init(mode: :test, dns_domain: "test.local")
+  describe "remote_spawn_monitor/2" do
+    test "spawns function locally when runner is on same node" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      backend = %{backend | runner_node_name: node()}
 
-      test_function = fn -> 2 + 2 end
+      func = fn -> 2 + 2 end
+      assert {:ok, {pid, ref}} = AppleContainersBackend.remote_spawn_monitor(backend, func)
+      assert is_pid(pid)
+      assert is_reference(ref)
+    end
 
-      assert {:ok, pid, ref} =
-               AppleContainersBackend.remote_spawn_monitor(backend, test_function)
+    test "spawns MFA locally when runner is on same node" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      backend = %{backend | runner_node_name: node()}
+
+      assert {:ok, {pid, ref}} =
+               AppleContainersBackend.remote_spawn_monitor(backend, {Kernel, :+, [1, 2]})
 
       assert is_pid(pid)
       assert is_reference(ref)
     end
+
+    test "raises on invalid term" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      backend = %{backend | runner_node_name: node()}
+
+      assert_raise ArgumentError, ~r/expected a null arity function/, fn ->
+        AppleContainersBackend.remote_spawn_monitor(backend, :not_a_function)
+      end
+    end
   end
 
-  describe "system operations" do
-    test "handles system shutdown" do
-      assert :ok = AppleContainersBackend.system_shutdown()
-    end
-
-    test "handles info messages" do
-      {:ok, backend} = AppleContainersBackend.init(mode: :test, dns_domain: "test.local")
+  describe "handle_info/2" do
+    test "returns noreply with unchanged state" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
 
       assert {:noreply, ^backend} =
-               AppleContainersBackend.handle_info(backend, {:test_message, "hello"})
+               AppleContainersBackend.handle_info({:some_message, "data"}, backend)
     end
   end
 end

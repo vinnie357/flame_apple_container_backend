@@ -17,8 +17,7 @@ defmodule FLAME.AppleContainers.PoolTest do
     {:ok, backend} =
       AppleContainersBackend.init(
         image: "test-worker:latest",
-        dns_domain: "test.local",
-        mode: :test
+        dns_domain: "test.local"
       )
 
     on_exit(fn ->
