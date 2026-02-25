@@ -33,7 +33,8 @@ defmodule FLAME.AppleContainersBackend do
     :network_name,
     :subnet,
     :enable_clustering,
-    :volumes
+    :volumes,
+    :env
   ]
 
   @impl true
@@ -57,7 +58,9 @@ defmodule FLAME.AppleContainersBackend do
       subnet: Keyword.get(opts, :subnet),
       enable_clustering: Keyword.get(opts, :enable_clustering, false),
       # Volume mounts for passing credentials/config into containers
-      volumes: Keyword.get(opts, :volumes, [])
+      volumes: Keyword.get(opts, :volumes, []),
+      # Extra environment variables to pass to containers (e.g., API tokens)
+      env: Keyword.get(opts, :env, [])
     }
 
     # Initialize supporting systems based on mode
@@ -443,16 +446,17 @@ defmodule FLAME.AppleContainersBackend do
   end
 
   defp build_container_run_command(backend, container_name, node_name) do
-    env_vars = [
+    base_env_vars = [
       "--env",
       "NODE_NAME=#{node_name}",
       "--env",
-      "ERLANG_COOKIE=#{backend.config.erlang_cookie}",
-      "--env",
-      "ERL_EPMD_ADDRESS=0.0.0.0",
-      "--env",
-      "ERL_EPMD_PORT=4369"
+      "ERLANG_COOKIE=#{backend.config.erlang_cookie}"
     ]
+
+    # Add extra environment variables (e.g., API tokens)
+    extra_env_vars = build_env_args(backend.env)
+
+    env_vars = base_env_vars ++ extra_env_vars
 
     # Add resource limits for better isolation
     resource_limits = [
@@ -489,6 +493,23 @@ defmodule FLAME.AppleContainersBackend do
   defp build_volume_args(volumes) when is_list(volumes) do
     Enum.flat_map(volumes, fn volume_spec ->
       ["--volume", volume_spec]
+    end)
+  end
+
+  defp build_env_args(nil), do: []
+  defp build_env_args([]), do: []
+
+  defp build_env_args(env_vars) when is_list(env_vars) do
+    # Accepts list of {key, value} tuples or "KEY=VALUE" strings
+    Enum.flat_map(env_vars, fn
+      {key, value} when is_binary(key) and is_binary(value) ->
+        ["--env", "#{key}=#{value}"]
+
+      env_string when is_binary(env_string) ->
+        ["--env", env_string]
+
+      _ ->
+        []
     end)
   end
 

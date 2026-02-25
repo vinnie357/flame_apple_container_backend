@@ -84,7 +84,7 @@ defmodule FLAME.AppleContainers.CLI.Mock do
   def get_container_stats(_name, _args \\ []), do: get_response(:get_container_stats)
 
   @impl true
-  def exec_in_container(_name, _command), do: get_response(:exec_container)
+  def exec_in_container(_name, _command), do: get_response(:exec_in_container)
 
   @impl true
   def update_container(_args), do: get_response(:update_container)
