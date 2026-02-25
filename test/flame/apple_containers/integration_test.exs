@@ -1,4 +1,9 @@
 defmodule FLAME.AppleContainers.IntegrationTest do
+  @moduledoc """
+  Integration tests that exercise the full system stack.
+  These use the real CLI adapter (no mocks) and require
+  Apple Container CLI to be available on the host.
+  """
   use ExUnit.Case, async: false
 
   alias FLAME.AppleContainers.{Manager, Monitor, Pool}

@@ -1,11 +1,19 @@
 defmodule FLAME.AppleContainers.MonitorTest do
   use ExUnit.Case, async: false
 
+  alias FLAME.AppleContainers.CLI.Mock, as: CLIMock
   alias FLAME.AppleContainers.{Monitor, Pool}
   alias FLAME.AppleContainersBackend
 
   setup do
-    # Create backend and pool for testing
+    original = Application.get_env(:flame_apple_container_backend, :cli_adapter)
+    Application.put_env(:flame_apple_container_backend, :cli_adapter, CLIMock)
+
+    CLIMock.set_responses(%{
+      list_dns_domains: {"test.local\n", 0},
+      hostname: {"test-host.local\n", 0}
+    })
+
     {:ok, backend} =
       AppleContainersBackend.init(
         image: "test-worker:latest",
@@ -25,8 +33,19 @@ defmodule FLAME.AppleContainers.MonitorTest do
     :timer.sleep(200)
 
     on_exit(fn ->
-      if Process.alive?(pool), do: Pool.shutdown(pool)
+      try do
+        if Process.alive?(pool), do: Pool.shutdown(pool)
+      catch
+        :exit, _ -> :ok
+      end
+
       if Process.alive?(manager), do: Process.exit(manager, :normal)
+
+      if original do
+        Application.put_env(:flame_apple_container_backend, :cli_adapter, original)
+      else
+        Application.delete_env(:flame_apple_container_backend, :cli_adapter)
+      end
     end)
 
     %{backend: backend, pool: pool, manager: manager}

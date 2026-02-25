@@ -1,17 +1,33 @@
 defmodule FLAME.AppleContainers.PoolTest do
   use ExUnit.Case, async: false
 
+  alias FLAME.AppleContainers.CLI.Mock, as: CLIMock
   alias FLAME.AppleContainers.Pool
   alias FLAME.AppleContainersBackend
 
   setup do
-    # Create a mock backend for testing
+    original = Application.get_env(:flame_apple_container_backend, :cli_adapter)
+    Application.put_env(:flame_apple_container_backend, :cli_adapter, CLIMock)
+
+    CLIMock.set_responses(%{
+      list_dns_domains: {"test.local\n", 0},
+      hostname: {"test-host.local\n", 0}
+    })
+
     {:ok, backend} =
       AppleContainersBackend.init(
         image: "test-worker:latest",
         dns_domain: "test.local",
         mode: :test
       )
+
+    on_exit(fn ->
+      if original do
+        Application.put_env(:flame_apple_container_backend, :cli_adapter, original)
+      else
+        Application.delete_env(:flame_apple_container_backend, :cli_adapter)
+      end
+    end)
 
     %{backend: backend}
   end
