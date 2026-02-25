@@ -1,43 +1,58 @@
-FROM elixir:1.15-alpine
+# Example Dockerfile for building a FLAME worker image
+#
+# Build from the flame_worker/ example app directory:
+#   container build -f ../Dockerfile.flame -t flame-worker:latest .
+#
+# Or copy this Dockerfile into your own application and adapt it.
+#
+# Requirements:
+#   - Elixir release with :flame as a dependency
+#   - FLAME.Terminator started in your supervision tree
+#   - Distributed Erlang enabled (RELEASE_DISTRIBUTION=name)
+#
+# The backend sets these env vars on the container at runtime:
+#   FLAME_PARENT   - encoded parent info (decoded by FLAME.Terminator)
+#   FLAME_HOST     - container hostname for discovery
+#   RELEASE_NODE   - full node name (name@host)
+#   RELEASE_COOKIE - erlang cookie matching the parent node
+#   PHX_SERVER     - "false" (workers don't serve HTTP)
 
-# Install required packages for Erlang distribution
-RUN apk add --no-cache bash openssl curl netcat-openbsd
+# --- Build stage ---
+FROM elixir:1.18-alpine AS builder
 
-# Set up application directory
+RUN apk add --no-cache build-base git
+
+ENV MIX_ENV=prod
+
 WORKDIR /app
 
-# Copy application files
-COPY mix.exs mix.lock ./
+COPY mix.exs ./
+RUN mix local.hex --force && \
+    mix local.rebar --force && \
+    mix deps.get --only prod && \
+    mix deps.compile
+
 COPY config config/
 COPY lib lib/
 
-# Install dependencies and compile
-RUN mix local.hex --force && \
-    mix local.rebar --force && \
-    mix deps.get && \
-    mix compile
+RUN mix compile && mix release flame_worker
 
-# Configure environment
-ENV HOME="/root"
-ENV ELIXIR_ERL_OPTIONS="+K true +A 4"
-ENV ERL_EPMD_ADDRESS="0.0.0.0"
+# --- Runtime stage ---
+FROM alpine:3.21
 
-# Copy and setup startup script
-COPY start-worker.sh /usr/local/bin/start-worker
-RUN chmod +x /usr/local/bin/start-worker
+RUN apk add --no-cache openssl ncurses ca-certificates
 
-# Health check script
-RUN echo '#!/bin/bash\n\
-epmd -names | grep -q "name " || exit 1\n\
-' > /usr/local/bin/health-check && \
-    chmod +x /usr/local/bin/health-check
+RUN addgroup -g 1001 flame && \
+    adduser -u 1001 -G flame -s /bin/sh -D flame
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD /usr/local/bin/health-check
+COPY --from=builder --chown=flame:flame /app/_build/prod/rel/flame_worker /app/
 
-# Expose EPMD port and beam port range
-EXPOSE 4369 9001-9999
+USER flame
+WORKDIR /app
 
-# Start the distributed node
-CMD ["/usr/local/bin/start-worker"]
+# The backend sets RELEASE_NODE, RELEASE_COOKIE, FLAME_PARENT at runtime.
+# Do NOT hardcode these here.
+ENV RELEASE_DISTRIBUTION=name
+
+ENTRYPOINT ["/app/bin/flame_worker"]
+CMD ["start"]
