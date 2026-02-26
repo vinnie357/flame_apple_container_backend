@@ -7,17 +7,6 @@ defmodule FlameAppleContainerBackend do
   container runtime on macOS. It enables elastic, on-demand compute by
   spinning up lightweight Apple Containers as FLAME worker nodes.
 
-  ## Features
-
-  - **Container lifecycle management** — start, stop, and monitor Apple
-    Containers via the `container` CLI
-  - **Security** — RBAC, policy engine, compliance checks, and audit logging
-  - **Monitoring** — container health checks, metrics collection, circuit
-    breaking, and alerting
-  - **Orchestration** — task scheduling, cluster management, and image
-    lifecycle
-  - **Web dashboard** — optional Phoenix LiveView UI for real-time visibility
-
   ## Prerequisites
 
   - macOS 26 or later with Apple Container support
@@ -32,19 +21,5 @@ defmodule FlameAppleContainerBackend do
         max: 10,
         max_concurrency: 5,
         idle_shutdown_after: 30_000
-
-  ## Configuration
-
-  All features are opt-in via environment variables prefixed with `FLAME_`:
-
-  | Variable | Default | Description |
-  |----------|---------|-------------|
-  | `FLAME_ENABLE_METRICS` | `"false"` | Enable metrics collection |
-  | `FLAME_ENABLE_SECURITY` | `"false"` | Enable security subsystems |
-  | `FLAME_ENABLE_WEB_INTERFACE` | `"false"` | Enable Phoenix dashboard |
-  | `FLAME_ENABLE_ORCHESTRATION` | `"false"` | Enable task orchestration |
-  | `FLAME_MINIMAL_MODE` | `"false"` | Start only core processes |
-
-  See `FlameAppleContainerBackend.Application` for the full list.
   """
 end
