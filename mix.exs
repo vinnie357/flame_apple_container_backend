@@ -11,7 +11,6 @@ defmodule FlameAppleContainerBackend.MixProject do
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases(),
       description: description(),
       package: package(),
       docs: docs(),
@@ -25,19 +24,13 @@ defmodule FlameAppleContainerBackend.MixProject do
   end
 
   def application do
-    extra_applications = [:logger]
-
-    extra_applications =
-      if Mix.env() == :test, do: extra_applications ++ [:floki], else: extra_applications
-
     [
-      extra_applications: extra_applications,
-      mod: {FlameAppleContainerBackend.Application, []}
+      extra_applications: [:logger]
     ]
   end
 
   defp description do
-    "A FLAME backend for macOS Apple Containers with security, monitoring, orchestration, and an optional web dashboard."
+    "A FLAME backend for macOS Apple Containers."
   end
 
   defp package do
@@ -68,39 +61,13 @@ defmodule FlameAppleContainerBackend.MixProject do
       {:jason, "~> 1.0"},
       {:telemetry, "~> 1.0"},
 
-      # Optional web dependencies
-      {:plug_cowboy, "~> 2.6", optional: true},
-      {:phoenix, "~> 1.7 or ~> 1.8", optional: true},
-      {:phoenix_live_view, "~> 0.20 or ~> 1.0", optional: true},
-      {:phoenix_html, "~> 3.3 or ~> 4.0", optional: true},
-      {:phoenix_live_dashboard, "~> 0.8", optional: true},
-      {:phoenix_live_reload, "~> 1.2", only: :dev, optional: true},
-      {:heroicons, "~> 0.5", optional: true},
-
-      # Optional monitoring dependencies
-      {:telemetry_metrics, "~> 0.6 or ~> 1.0", optional: true},
-      {:telemetry_poller, "~> 1.0", optional: true},
-      {:prometheus_ex, "~> 3.0 or ~> 5.0", optional: true},
-
-      # Optional advanced features
-      {:req, "~> 0.5", optional: true},
-      {:fuse, "~> 2.4", optional: true},
-      {:gen_state_machine, "~> 3.0", optional: true},
-
       # Documentation
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false},
 
       # Development and testing tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:floki, ">= 0.30.0", only: :test},
       {:tidewave, "~> 0.5", only: :dev},
       {:bandit, "~> 1.0", only: :dev}
-    ]
-  end
-
-  defp aliases do
-    [
-      tidewave: "run -e 'Bandit.start_link(plug: Tidewave, port: 4000)' --no-halt"
     ]
   end
 end

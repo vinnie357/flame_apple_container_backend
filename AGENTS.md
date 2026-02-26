@@ -73,18 +73,16 @@ troubleshooting specific failures. The `ci` task is the authoritative check.
 
 ## Architecture
 
-- `lib/flame/` — core FLAME modules (GenServers, supervisors)
-- `lib/flame/apple_containers/` — Apple Container CLI integration
-- `lib/flame/security/` — RBAC, policies, compliance, audit
-- `lib/flame_web/` — optional Phoenix web dashboard
+- `lib/flame/apple_containers_backend.ex` — FLAME backend (Runner protocol)
+- `lib/flame/apple_containers/cli.ex` — CLI behaviour + adapter pattern
+- `lib/flame/apple_containers/cli/system.ex` — real CLI adapter
+- `lib/flame/apple_containers/cli/mock.ex` — test mock (process dictionary)
 - `config/` — environment-specific configuration
-- Features are opt-in via `FLAME_*` environment variables
 
 ## Dependencies
 
 - Core: flame, jason, telemetry
-- Optional: phoenix, phoenix_live_view, req, fuse, prometheus_ex
-- Dev only: ex_doc, credo, tidewave, bandit, floki
+- Dev only: ex_doc, credo, tidewave, bandit
 
 ## Landing the Plane (Session Completion)
 
@@ -111,3 +109,4 @@ troubleshooting specific failures. The `ci` task is the authoritative check.
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
+- you can't close anything that doesn't follow TDD, all features will have tests, and ci will pass before closing or commiting. so that all commits are clean, and nothing is "done" until it has tests.  
