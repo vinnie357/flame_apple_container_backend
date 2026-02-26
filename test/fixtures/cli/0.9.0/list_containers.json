@@ -1,0 +1,6 @@
+{
+  "command": ["container", "list"],
+  "stdout": "ID        IMAGE                                               OS     ARCH   STATE    ADDR             CPUS  MEMORY   STARTED\nbuildkit  ghcr.io/apple/container-builder-shim/builder:0.7.0  linux  arm64  running  192.168.66.3/24  2     2048 MB  2026-02-25T14:32:26Z\n",
+  "exit_code": 0,
+  "notes": "Tab-separated header followed by one container per line"
+}

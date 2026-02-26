@@ -1,0 +1,6 @@
+{
+  "command": ["container", "image", "ls"],
+  "stdout": "NAME                                           TAG                                                 DIGEST\nalpine                                         latest                                              25109184c71bdad752c8312a...\ndebian                                         bookworm-20260202-slim                              98f4b71de414932439ac6ac6...\nelixir                                         1.19-otp-27-alpine                                  83df1d3a70cec85fe2935329...\nflame-worker                                   latest                                              5bd9b795dc2fb1ecb1f71400...\n",
+  "exit_code": 0,
+  "notes": "Tab-separated table with NAME, TAG, DIGEST columns. Truncated to representative entries."
+}

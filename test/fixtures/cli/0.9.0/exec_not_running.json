@@ -1,0 +1,6 @@
+{
+  "command": ["container", "exec", "fixture-test", "echo", "hello"],
+  "stdout": "Error: invalidState: \"container fixture-test is not running\"\n",
+  "exit_code": 1,
+  "notes": "Exec on stopped container returns exit code 1"
+}

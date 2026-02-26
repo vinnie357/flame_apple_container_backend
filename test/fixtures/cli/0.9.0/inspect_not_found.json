@@ -1,0 +1,6 @@
+{
+  "command": ["container", "inspect", "nonexistent-container"],
+  "stdout": "[]\n",
+  "exit_code": 0,
+  "notes": "Returns empty JSON array for nonexistent container, exit code 0"
+}

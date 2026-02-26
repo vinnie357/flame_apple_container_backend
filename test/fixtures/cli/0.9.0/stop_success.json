@@ -1,0 +1,6 @@
+{
+  "command": ["container", "stop", "fixture-test", "--time", "10"],
+  "stdout": "fixture-test\n",
+  "exit_code": 0,
+  "notes": "Returns container name on success"
+}

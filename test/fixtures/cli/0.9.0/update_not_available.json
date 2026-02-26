@@ -1,0 +1,7 @@
+{
+  "command": ["container", "update"],
+  "stdout": "",
+  "stderr": "Error: Plugin 'container-update' not found.\n\n- If system services are not running, start them with: container system start\n- If the plugin isn't installed, ensure it exists under:\n\nCheck to see that the plugin exists under:\n  - /usr/local/libexec/container-plugins/update\n  - /usr/local/libexec/container/plugins/update\n\nUsage: container [--debug] <subcommand>\n  See 'container --help' for more information.\n",
+  "exit_code": 64,
+  "notes": "container update is not available in 0.9.0 — plugin not found"
+}

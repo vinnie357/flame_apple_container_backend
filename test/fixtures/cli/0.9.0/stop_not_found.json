@@ -1,0 +1,6 @@
+{
+  "command": ["container", "stop", "nonexistent-container"],
+  "stdout": "",
+  "exit_code": 0,
+  "notes": "Stopping a nonexistent container returns exit code 0 with no output"
+}

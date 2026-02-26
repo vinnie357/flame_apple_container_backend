@@ -1,0 +1,6 @@
+{
+  "command": ["container", "stop", "fixture-test"],
+  "stdout": "fixture-test\n",
+  "exit_code": 0,
+  "notes": "Stopping an already-stopped container still returns exit code 0"
+}

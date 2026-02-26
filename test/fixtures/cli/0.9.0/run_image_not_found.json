@@ -1,0 +1,6 @@
+{
+  "command": ["container", "run", "--rm", "-d", "nonexistent-image:fake"],
+  "stdout": "Error: internalError: \"HTTP request to https://registry-1.docker.io/v2/library/nonexistent-image/manifests/fake failed with response: 401 Unauthorized. Reason: Unknown, no credentials found for host registry-1.docker.io\"\n",
+  "exit_code": 1,
+  "notes": "Image pull failure returns exit code 1"
+}

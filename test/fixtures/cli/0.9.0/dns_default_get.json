@@ -1,0 +1,6 @@
+{
+  "command": ["container", "system", "dns", "default", "get"],
+  "stdout": "Error: 2 unexpected arguments: 'default', 'get'\nUsage: container system dns [--debug] <subcommand>\n  See 'container system dns --help' for more information.\n",
+  "exit_code": 64,
+  "notes": "Command does not exist in 0.9.0. Only list/create/delete are available."
+}

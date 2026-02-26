@@ -1,0 +1,6 @@
+{
+  "command": ["container", "inspect", "fixture-test"],
+  "stdout": "[{\"status\":\"stopped\",\"configuration\":{\"labels\":{},\"rosetta\":false,\"readOnly\":false,\"sysctls\":{},\"publishedSockets\":[],\"platform\":{\"architecture\":\"arm64\",\"os\":\"linux\"},\"dns\":{\"nameservers\":[],\"options\":[],\"searchDomains\":[],\"domain\":\"flame.local\"},\"publishedPorts\":[],\"ssh\":false,\"id\":\"fixture-test\",\"mounts\":[],\"runtimeHandler\":\"container-runtime-linux\",\"virtualization\":false,\"networks\":[{\"network\":\"default\",\"options\":{\"hostname\":\"fixture-test.flame.local.\"}}],\"resources\":{\"memoryInBytes\":1073741824,\"cpus\":4},\"initProcess\":{\"environment\":[\"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"],\"user\":{\"id\":{\"uid\":0,\"gid\":0}},\"arguments\":[\"120\"],\"supplementalGroups\":[],\"executable\":\"sleep\",\"workingDirectory\":\"/\",\"rlimits\":[],\"terminal\":false},\"image\":{\"reference\":\"docker.io/library/alpine:latest\",\"descriptor\":{\"mediaType\":\"application/vnd.oci.image.index.v1+json\",\"digest\":\"sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659\",\"size\":9218}}},\"networks\":[],\"startedDate\":793769430.817995}]\n",
+  "exit_code": 0,
+  "notes": "Stopped container: status is 'stopped', networks array is empty"
+}
