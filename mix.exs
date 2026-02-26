@@ -14,6 +14,9 @@ defmodule FlameAppleContainerBackend.MixProject do
       description: description(),
       package: package(),
       docs: docs(),
+      test_coverage: [
+        ignore_modules: [FLAME.AppleContainers.CLI.System]
+      ],
       source_url: @source_url,
       homepage_url: @source_url
     ]
@@ -47,7 +50,7 @@ defmodule FlameAppleContainerBackend.MixProject do
 
   defp docs do
     [
-      main: "FlameAppleContainerBackend",
+      main: "FLAME.AppleContainersBackend",
       source_ref: "v#{@version}",
       source_url: @source_url,
       extras: ["README.md", "CHANGELOG.md", "LICENSE"]
