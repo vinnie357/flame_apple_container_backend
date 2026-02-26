@@ -1,0 +1,6 @@
+{
+  "command": ["container", "exec", "fixture-test", "echo", "hello"],
+  "stdout": "hello\n",
+  "exit_code": 0,
+  "notes": "Returns command stdout"
+}

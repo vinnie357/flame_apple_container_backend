@@ -1,0 +1,6 @@
+{
+  "command": ["container", "stats", "nonexistent-container", "--no-stream"],
+  "stdout": "Error: notFound: \"no such container: nonexistent-container\"\n",
+  "exit_code": 1,
+  "notes": "Stats on nonexistent container returns exit code 1"
+}

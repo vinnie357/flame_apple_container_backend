@@ -1,0 +1,6 @@
+{
+  "command": ["container", "stats", "buildkit", "--no-stream"],
+  "stdout": "Container ID  Cpu %  Memory Usage         Net Rx/Tx              Block I/O              Pids\nbuildkit      0.01%  1.56 GiB / 2.00 GiB  453.30 MiB / 3.05 MiB  144.32 MiB / 2.39 GiB  22\n",
+  "exit_code": 0,
+  "notes": "Tab-separated table. No JSON format available without parsing."
+}

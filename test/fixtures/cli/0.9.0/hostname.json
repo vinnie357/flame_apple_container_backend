@@ -1,0 +1,6 @@
+{
+  "command": ["hostname"],
+  "stdout": "Vincents-MacBook-Pro.local\n",
+  "exit_code": 0,
+  "notes": "Returns FQDN of the host machine"
+}

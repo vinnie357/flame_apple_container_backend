@@ -1,0 +1,6 @@
+{
+  "command": ["container", "exec", "nonexistent-container", "echo", "hello"],
+  "stdout": "Error: notFound: \"get failed: container nonexistent-container not found\"\n",
+  "exit_code": 1,
+  "notes": "Exec on nonexistent container returns exit code 1"
+}

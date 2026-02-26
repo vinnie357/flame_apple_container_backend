@@ -1,0 +1,6 @@
+{
+  "command": ["container", "run", "-d", "--name", "fixture-test", "alpine:latest", "sleep", "120"],
+  "stdout": "fixture-test\n",
+  "exit_code": 0,
+  "notes": "Returns container ID/name on success"
+}

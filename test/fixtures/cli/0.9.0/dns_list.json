@@ -1,0 +1,6 @@
+{
+  "command": ["container", "system", "dns", "list"],
+  "stdout": "DOMAIN\nflame.local\ntest.local\n",
+  "exit_code": 0,
+  "notes": "Header line followed by one domain per line"
+}
