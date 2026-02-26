@@ -5,22 +5,11 @@ defmodule FLAME.AppleContainersBackendTest do
   alias FLAME.AppleContainersBackend
 
   setup do
-    original = Application.get_env(:flame_apple_container_backend, :cli_adapter)
-    Application.put_env(:flame_apple_container_backend, :cli_adapter, CLIMock)
-
     CLIMock.set_responses(%{
       list_dns_domains: {"flame.local\ntest.local\n", 0},
       get_default_dns_domain: {"flame.local\n", 0},
       hostname: {"test-host.local\n", 0}
     })
-
-    on_exit(fn ->
-      if original do
-        Application.put_env(:flame_apple_container_backend, :cli_adapter, original)
-      else
-        Application.delete_env(:flame_apple_container_backend, :cli_adapter)
-      end
-    end)
 
     :ok
   end
@@ -77,12 +66,61 @@ defmodule FLAME.AppleContainersBackendTest do
       assert backend.dns_domain == "other.local"
     end
 
+    test "falls back to test.local when available and requested domain missing" do
+      CLIMock.set_response(:list_dns_domains, {"prod.local\ntest.local\n", 0})
+
+      opts = @base_opts ++ [dns_domain: "missing.local"]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.dns_domain == "test.local"
+    end
+
+    test "falls back to default dns domain when no domains available" do
+      CLIMock.set_responses(%{
+        list_dns_domains: {"\n", 0},
+        get_default_dns_domain: {"system-default.local\n", 0}
+      })
+
+      opts = @base_opts ++ [dns_domain: "missing.local"]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.dns_domain == "system-default.local"
+    end
+
+    test "falls back to requested domain when no domains and default fails" do
+      CLIMock.set_responses(%{
+        list_dns_domains: {"\n", 0},
+        get_default_dns_domain: {"", 1}
+      })
+
+      opts = @base_opts ++ [dns_domain: "last-resort.local"]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.dns_domain == "last-resort.local"
+    end
+
     test "falls back to requested domain when dns list fails" do
       CLIMock.set_response(:list_dns_domains, {"error: not available", 1})
 
       opts = @base_opts ++ [dns_domain: "flame.local"]
       assert {:ok, backend} = AppleContainersBackend.init(opts)
       assert backend.dns_domain == "flame.local"
+    end
+
+    test "initializes with clustering enabled" do
+      opts = @base_opts ++ [enable_clustering: true, network_name: "my-net"]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.enable_clustering == true
+      assert backend.network_name == "my-net"
+    end
+
+    test "initializes with env as map" do
+      opts = @base_opts ++ [env: %{"KEY" => "val"}]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.env == %{"KEY" => "val"}
+    end
+
+    test "initializes with string env vars" do
+      opts = @base_opts ++ [env: ["KEY=val", "OTHER=thing"]]
+      assert {:ok, backend} = AppleContainersBackend.init(opts)
+      assert backend.env == ["KEY=val", "OTHER=thing"]
     end
 
     test "encoded_parent contains FLAME.Parent data" do
@@ -118,6 +156,85 @@ defmodule FLAME.AppleContainersBackendTest do
       assert new_state.runner_node_name == node(terminator_pid)
     end
 
+    test "includes volume and network args when configured" do
+      opts =
+        @base_opts ++
+          [
+            volumes: ["/data:/app/data"],
+            enable_clustering: true,
+            network_name: "flame-net"
+          ]
+
+      {:ok, backend} = AppleContainersBackend.init(opts)
+      parent_ref = backend.parent_ref
+      test_pid = self()
+
+      CLIMock.set_response(:run_container, fn ->
+        spawn(fn ->
+          send(test_pid, {parent_ref, {:remote_up, self()}})
+          Process.sleep(:infinity)
+        end)
+
+        {"container-id\n", 0}
+      end)
+
+      assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
+    end
+
+    test "includes string env vars in container args" do
+      opts = @base_opts ++ [env: ["EXTRA=value"]]
+      {:ok, backend} = AppleContainersBackend.init(opts)
+      parent_ref = backend.parent_ref
+      test_pid = self()
+
+      CLIMock.set_response(:run_container, fn ->
+        spawn(fn ->
+          send(test_pid, {parent_ref, {:remote_up, self()}})
+          Process.sleep(:infinity)
+        end)
+
+        {"container-id\n", 0}
+      end)
+
+      assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
+    end
+
+    test "includes map env vars in container args" do
+      opts = @base_opts ++ [env: %{"MAP_KEY" => "map_val"}]
+      {:ok, backend} = AppleContainersBackend.init(opts)
+      parent_ref = backend.parent_ref
+      test_pid = self()
+
+      CLIMock.set_response(:run_container, fn ->
+        spawn(fn ->
+          send(test_pid, {parent_ref, {:remote_up, self()}})
+          Process.sleep(:infinity)
+        end)
+
+        {"container-id\n", 0}
+      end)
+
+      assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
+    end
+
+    test "logs when log option is set" do
+      opts = @base_opts ++ [log: :info]
+      {:ok, backend} = AppleContainersBackend.init(opts)
+      parent_ref = backend.parent_ref
+      test_pid = self()
+
+      CLIMock.set_response(:run_container, fn ->
+        spawn(fn ->
+          send(test_pid, {parent_ref, {:remote_up, self()}})
+          Process.sleep(:infinity)
+        end)
+
+        {"container-id\n", 0}
+      end)
+
+      assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
+    end
+
     test "returns error when container fails to start" do
       {:ok, backend} = AppleContainersBackend.init(@base_opts)
 
@@ -137,6 +254,44 @@ defmodule FLAME.AppleContainersBackendTest do
           CLIMock.set_responses(%{
             run_container: {"container-id-123\n", 0},
             stop_container: {"", 0}
+          })
+
+          AppleContainersBackend.remote_boot(backend)
+        end)
+
+      ref = Process.monitor(pid)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :timeout}, 500
+    end
+
+    test "exits on timeout and falls back to kill when stop fails" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts ++ [boot_timeout: 100])
+
+      pid =
+        spawn(fn ->
+          CLIMock.set_responses(%{
+            run_container: {"container-id-123\n", 0},
+            stop_container: {"error", 1},
+            kill_container: {"", 0}
+          })
+
+          AppleContainersBackend.remote_boot(backend)
+        end)
+
+      ref = Process.monitor(pid)
+
+      assert_receive {:DOWN, ^ref, :process, ^pid, :timeout}, 500
+    end
+
+    test "exits on timeout when both stop and kill fail" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts ++ [boot_timeout: 100])
+
+      pid =
+        spawn(fn ->
+          CLIMock.set_responses(%{
+            run_container: {"container-id-123\n", 0},
+            stop_container: {"error", 1},
+            kill_container: {"error", 1}
           })
 
           AppleContainersBackend.remote_boot(backend)
@@ -180,9 +335,31 @@ defmodule FLAME.AppleContainersBackendTest do
     end
   end
 
+  describe "inspect/1" do
+    test "renders struct with safe fields only" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      output = inspect(backend)
+
+      assert output =~ "FLAME.AppleContainersBackend"
+      assert output =~ "image:"
+      assert output =~ "dns_domain:"
+      # Sensitive fields should be excluded
+      refute output =~ "encoded_parent:"
+      refute output =~ "parent_ref:"
+      refute output =~ "erlang_cookie:"
+    end
+  end
+
   describe "handle_info/2" do
     test "returns noreply with unchanged state" do
       {:ok, backend} = AppleContainersBackend.init(@base_opts)
+
+      assert {:noreply, ^backend} =
+               AppleContainersBackend.handle_info({:some_message, "data"}, backend)
+    end
+
+    test "logs message when log option is set" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts ++ [log: :debug])
 
       assert {:noreply, ^backend} =
                AppleContainersBackend.handle_info({:some_message, "data"}, backend)
