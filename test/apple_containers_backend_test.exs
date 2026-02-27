@@ -6,8 +6,7 @@ defmodule FLAME.AppleContainersBackendTest do
 
   setup do
     CLIMock.set_responses(%{
-      list_dns_domains: {"flame.local\ntest.local\n", 0},
-      get_default_dns_domain: {"flame.local\n", 0},
+      list_dns_domains: {"DOMAIN\nflame.local\ntest.local\n", 0},
       hostname: {"test-host.local\n", 0}
     })
 
@@ -59,7 +58,7 @@ defmodule FLAME.AppleContainersBackendTest do
     end
 
     test "falls back when requested domain not available" do
-      CLIMock.set_response(:list_dns_domains, {"other.local\n", 0})
+      CLIMock.set_response(:list_dns_domains, {"DOMAIN\nother.local\n", 0})
 
       opts = @base_opts ++ [dns_domain: "missing.local"]
       assert {:ok, backend} = AppleContainersBackend.init(opts)
@@ -67,29 +66,15 @@ defmodule FLAME.AppleContainersBackendTest do
     end
 
     test "falls back to test.local when available and requested domain missing" do
-      CLIMock.set_response(:list_dns_domains, {"prod.local\ntest.local\n", 0})
+      CLIMock.set_response(:list_dns_domains, {"DOMAIN\nprod.local\ntest.local\n", 0})
 
       opts = @base_opts ++ [dns_domain: "missing.local"]
       assert {:ok, backend} = AppleContainersBackend.init(opts)
       assert backend.dns_domain == "test.local"
     end
 
-    test "falls back to default dns domain when no domains available" do
-      CLIMock.set_responses(%{
-        list_dns_domains: {"\n", 0},
-        get_default_dns_domain: {"system-default.local\n", 0}
-      })
-
-      opts = @base_opts ++ [dns_domain: "missing.local"]
-      assert {:ok, backend} = AppleContainersBackend.init(opts)
-      assert backend.dns_domain == "system-default.local"
-    end
-
-    test "falls back to requested domain when no domains and default fails" do
-      CLIMock.set_responses(%{
-        list_dns_domains: {"\n", 0},
-        get_default_dns_domain: {"", 1}
-      })
+    test "falls back to requested domain when no domains available" do
+      CLIMock.set_response(:list_dns_domains, {"DOMAIN\n", 0})
 
       opts = @base_opts ++ [dns_domain: "last-resort.local"]
       assert {:ok, backend} = AppleContainersBackend.init(opts)
@@ -147,7 +132,7 @@ defmodule FLAME.AppleContainersBackendTest do
           Process.sleep(:infinity)
         end)
 
-        {"container-id-123\n", 0}
+        {"flame-worker-test\n", 0}
       end)
 
       assert {:ok, terminator_pid, new_state} = AppleContainersBackend.remote_boot(backend)
@@ -175,7 +160,7 @@ defmodule FLAME.AppleContainersBackendTest do
           Process.sleep(:infinity)
         end)
 
-        {"container-id\n", 0}
+        {"flame-worker-test\n", 0}
       end)
 
       assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
@@ -193,7 +178,7 @@ defmodule FLAME.AppleContainersBackendTest do
           Process.sleep(:infinity)
         end)
 
-        {"container-id\n", 0}
+        {"flame-worker-test\n", 0}
       end)
 
       assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
@@ -211,7 +196,7 @@ defmodule FLAME.AppleContainersBackendTest do
           Process.sleep(:infinity)
         end)
 
-        {"container-id\n", 0}
+        {"flame-worker-test\n", 0}
       end)
 
       assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
@@ -229,7 +214,7 @@ defmodule FLAME.AppleContainersBackendTest do
           Process.sleep(:infinity)
         end)
 
-        {"container-id\n", 0}
+        {"flame-worker-test\n", 0}
       end)
 
       assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
@@ -238,9 +223,12 @@ defmodule FLAME.AppleContainersBackendTest do
     test "returns error when container fails to start" do
       {:ok, backend} = AppleContainersBackend.init(@base_opts)
 
-      CLIMock.set_response(:run_container, {"image not found\n", 125})
+      CLIMock.set_response(
+        :run_container,
+        {"Error: internalError: \"HTTP request failed with response: 401 Unauthorized\"\n", 1}
+      )
 
-      assert {:error, {:container_start_failed, 125, _}} =
+      assert {:error, {:container_start_failed, 1, _}} =
                AppleContainersBackend.remote_boot(backend)
     end
 
@@ -252,8 +240,8 @@ defmodule FLAME.AppleContainersBackendTest do
       pid =
         spawn(fn ->
           CLIMock.set_responses(%{
-            run_container: {"container-id-123\n", 0},
-            stop_container: {"", 0}
+            run_container: {"flame-worker-test\n", 0},
+            stop_container: {"flame-worker-test\n", 0}
           })
 
           AppleContainersBackend.remote_boot(backend)
@@ -270,7 +258,7 @@ defmodule FLAME.AppleContainersBackendTest do
       pid =
         spawn(fn ->
           CLIMock.set_responses(%{
-            run_container: {"container-id-123\n", 0},
+            run_container: {"flame-worker-test\n", 0},
             stop_container: {"error", 1},
             kill_container: {"", 0}
           })
@@ -289,7 +277,7 @@ defmodule FLAME.AppleContainersBackendTest do
       pid =
         spawn(fn ->
           CLIMock.set_responses(%{
-            run_container: {"container-id-123\n", 0},
+            run_container: {"flame-worker-test\n", 0},
             stop_container: {"error", 1},
             kill_container: {"error", 1}
           })

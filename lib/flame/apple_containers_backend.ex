@@ -312,7 +312,7 @@ defmodule FLAME.AppleContainersBackend do
           |> String.trim()
           |> String.split("\n")
           |> Enum.map(&String.trim/1)
-          |> Enum.reject(&(&1 == ""))
+          |> Enum.reject(&(&1 == "" or &1 == "DOMAIN"))
 
         select_dns_domain(requested_domain, available_domains)
 
@@ -338,16 +338,6 @@ defmodule FLAME.AppleContainersBackend do
         hd(available_domains)
 
       true ->
-        select_default_dns_domain(requested_domain)
-    end
-  end
-
-  defp select_default_dns_domain(requested_domain) do
-    case CLI.adapter().get_default_dns_domain() do
-      {default_domain, 0} when default_domain != "" ->
-        String.trim(default_domain)
-
-      _ ->
         requested_domain
     end
   end

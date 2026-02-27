@@ -23,12 +23,6 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
       assert is_binary(output)
       assert String.contains?(output, ".local")
     end
-
-    test "get_default_dns_domain returns a domain" do
-      {output, exit_code} = CLISystem.get_default_dns_domain()
-      assert exit_code == 0
-      assert String.trim(output) =~ ~r/\.local$/
-    end
   end
 
   describe "hostname" do
@@ -52,25 +46,26 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
       assert exit_code == 0
     end
 
-    test "inspect_container returns error for nonexistent container" do
-      {_output, exit_code} =
-        CLISystem.inspect_container("nonexistent-container-#{System.unique_integer([:positive])}")
+    test "inspect_container returns empty array for nonexistent container" do
+      {output, exit_code} =
+        CLISystem.inspect_container("nonexistent-#{System.unique_integer([:positive])}")
 
-      assert exit_code != 0
+      assert exit_code == 0
+      assert String.trim(output) == "[]"
     end
 
-    test "stop_container returns error for nonexistent container" do
+    test "stop_container succeeds silently for nonexistent container" do
       {_output, exit_code} =
-        CLISystem.stop_container("nonexistent-container-#{System.unique_integer([:positive])}")
+        CLISystem.stop_container("nonexistent-#{System.unique_integer([:positive])}")
 
-      assert exit_code != 0
+      assert exit_code == 0
     end
 
-    test "kill_container returns error for nonexistent container" do
+    test "kill_container succeeds silently for nonexistent container" do
       {_output, exit_code} =
-        CLISystem.kill_container("nonexistent-container-#{System.unique_integer([:positive])}")
+        CLISystem.kill_container("nonexistent-#{System.unique_integer([:positive])}")
 
-      assert exit_code != 0
+      assert exit_code == 0
     end
   end
 end
