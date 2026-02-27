@@ -14,11 +14,6 @@ defmodule FLAME.AppleContainers.CLI.System do
   end
 
   @impl true
-  def get_default_dns_domain do
-    System.cmd("container", ["system", "dns", "default", "get"], stderr_to_stdout: true)
-  end
-
-  @impl true
   def run_container(args) do
     System.cmd("container", ["run" | args], stderr_to_stdout: true)
   end
@@ -53,11 +48,6 @@ defmodule FLAME.AppleContainers.CLI.System do
   @impl true
   def exec_in_container(name, command) do
     System.cmd("container", ["exec", name | command], stderr_to_stdout: true)
-  end
-
-  @impl true
-  def update_container(args) do
-    System.cmd("container", ["update" | args], stderr_to_stdout: true)
   end
 
   @impl true

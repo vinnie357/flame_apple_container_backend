@@ -20,7 +20,6 @@ defmodule FLAME.AppleContainers.CLI do
 
   # DNS operations
   @callback list_dns_domains() :: cmd_result()
-  @callback get_default_dns_domain() :: cmd_result()
 
   # Container lifecycle
   @callback run_container(args :: [String.t()]) :: cmd_result()
@@ -34,9 +33,6 @@ defmodule FLAME.AppleContainers.CLI do
 
   # Container execution
   @callback exec_in_container(name :: String.t(), command :: [String.t()]) :: cmd_result()
-
-  # Resource management
-  @callback update_container(args :: [String.t()]) :: cmd_result()
 
   # Image operations
   @callback list_images(args :: [String.t()]) :: cmd_result()

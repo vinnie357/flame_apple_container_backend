@@ -63,9 +63,6 @@ defmodule FLAME.AppleContainers.CLI.Mock do
   def list_dns_domains, do: get_response(:list_dns_domains)
 
   @impl true
-  def get_default_dns_domain, do: get_response(:get_default_dns_domain)
-
-  @impl true
   def run_container(_args), do: get_response(:run_container)
 
   @impl true
@@ -85,9 +82,6 @@ defmodule FLAME.AppleContainers.CLI.Mock do
 
   @impl true
   def exec_in_container(_name, _command), do: get_response(:exec_in_container)
-
-  @impl true
-  def update_container(_args), do: get_response(:update_container)
 
   @impl true
   def list_images(_args \\ []), do: get_response(:list_images)
