@@ -220,6 +220,36 @@ defmodule FLAME.AppleContainersBackendTest do
       assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
     end
 
+    test "includes RELEASE_DISTRIBUTION=name in container env args" do
+      {:ok, backend} = AppleContainersBackend.init(@base_opts)
+      parent_ref = backend.parent_ref
+      test_pid = self()
+
+      CLIMock.set_response(:run_container, fn args ->
+        send(test_pid, {:captured_args, args})
+
+        spawn(fn ->
+          send(test_pid, {parent_ref, {:remote_up, self()}})
+          Process.sleep(:infinity)
+        end)
+
+        {"flame-worker-test\n", 0}
+      end)
+
+      assert {:ok, _pid, _state} = AppleContainersBackend.remote_boot(backend)
+
+      assert_receive {:captured_args, args}
+
+      # Find all --env arguments and their values
+      env_pairs =
+        args
+        |> Enum.chunk_every(2, 1, :discard)
+        |> Enum.filter(fn [flag, _val] -> flag == "--env" end)
+        |> Enum.map(fn [_flag, val] -> val end)
+
+      assert "RELEASE_DISTRIBUTION=name" in env_pairs
+    end
+
     test "returns error when container fails to start" do
       {:ok, backend} = AppleContainersBackend.init(@base_opts)
 

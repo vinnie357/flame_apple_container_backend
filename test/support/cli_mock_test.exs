@@ -52,9 +52,14 @@ defmodule FLAME.AppleContainers.CLI.Mock do
   end
 
   defp get_response(callback, default \\ {"", 1}) do
+    get_response(callback, [], default)
+  end
+
+  defp get_response(callback, args, default) do
     case Process.get({__MODULE__, callback}) do
       nil -> default
       fun when is_function(fun, 0) -> fun.()
+      fun when is_function(fun, 1) -> fun.(args)
       response -> response
     end
   end
@@ -63,7 +68,7 @@ defmodule FLAME.AppleContainers.CLI.Mock do
   def list_dns_domains, do: get_response(:list_dns_domains)
 
   @impl true
-  def run_container(_args), do: get_response(:run_container)
+  def run_container(args), do: get_response(:run_container, args, {"", 1})
 
   @impl true
   def stop_container(_name, _opts \\ []), do: get_response(:stop_container)
