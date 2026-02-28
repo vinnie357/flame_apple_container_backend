@@ -145,6 +145,7 @@ defmodule FLAME.AppleContainersBackend do
         {"FLAME_PARENT", state.encoded_parent},
         {"FLAME_HOST", hostname},
         {"PHX_SERVER", "false"},
+        {"RELEASE_DISTRIBUTION", "name"},
         {"RELEASE_NODE", "#{state.runner_node_base}@#{hostname}"},
         {"RELEASE_COOKIE", to_string(state.erlang_cookie)}
       ] ++ normalize_env(state.env)
