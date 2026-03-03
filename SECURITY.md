@@ -21,9 +21,7 @@ Include:
 
 ## Response Timeline
 
-- **Acknowledgment**: within 48 hours
-- **Initial assessment**: within 1 week
-- **Fix timeline**: depends on severity
+Responses are best effort. This is a community-maintained project and maintainers may not be available immediately.
 
 ## Disclosure Policy
 
