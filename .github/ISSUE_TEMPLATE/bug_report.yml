@@ -1,0 +1,61 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting a bug!
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the issue
+      placeholder: |
+        1. Configure FLAME pool with ...
+        2. Call `FLAME.call(...)` with ...
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which version of flame_apple_container_backend?
+    validations:
+      required: true
+  - type: input
+    id: elixir_version
+    attributes:
+      label: Elixir / OTP Version
+      description: Output of `elixir --version`
+      placeholder: "Elixir 1.19.5 (compiled with Erlang/OTP 28)"
+    validations:
+      required: true
+  - type: input
+    id: macos_version
+    attributes:
+      label: macOS Version
+      description: Output of `sw_vers --productVersion`
+      placeholder: "26.0"
+    validations:
+      required: true
+  - type: input
+    id: container_cli_version
+    attributes:
+      label: Container CLI Version
+      description: Output of `container --version`
+      placeholder: "0.9.0"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any error output or logs
+      render: shell
