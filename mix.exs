@@ -44,7 +44,7 @@ defmodule FlameAppleContainerBackend.MixProject do
       links: %{
         "GitHub" => @source_url
       },
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
+      files: ~w(lib docs .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 
@@ -53,7 +53,7 @@ defmodule FlameAppleContainerBackend.MixProject do
       main: "FLAME.AppleContainersBackend",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
+      extras: ["README.md", "docs/workflow-patterns.md", "CHANGELOG.md", "LICENSE"]
     ]
   end
 
