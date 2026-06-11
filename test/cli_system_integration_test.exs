@@ -1,8 +1,8 @@
 defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
   @moduledoc """
-  Integration tests for the real CLI adapter against container CLI 0.9.0.
+  Integration tests for the real CLI adapter against container CLI 1.0.0+.
 
-  These tests require the `container` CLI (Apple Container 0.9.0+)
+  These tests require the `container` CLI (Apple Container 1.0.0+)
   installed on the host. They are excluded from CI by default.
 
   Run manually with:
@@ -19,7 +19,7 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
   @test_image "alpine:latest"
 
   describe "version" do
-    test "container CLI is 0.9.0+" do
+    test "container CLI is 1.0.0+" do
       {output, 0} = System.cmd("container", ["--version"], stderr_to_stdout: true)
       assert output =~ ~r/container CLI version (\d+)\.(\d+)\.(\d+)/
 
@@ -27,7 +27,7 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
         Regex.run(~r/container CLI version (\d+)\.(\d+)\.(\d+)/, output)
 
       version = {String.to_integer(major), String.to_integer(minor)}
-      assert version >= {0, 9}, "Expected container CLI >= 0.9.0, got #{output}"
+      assert version >= {1, 0}, "Expected container CLI >= 1.0.0, got #{output}"
     end
   end
 
@@ -123,6 +123,34 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
         # Ensure cleanup even if assertions fail
         CLISystem.kill_container(container_name)
       end
+    end
+  end
+
+  describe "image build" do
+    test "build_image --help describes the build subcommand" do
+      {output, 0} = CLISystem.build_image(["--help"])
+      assert output =~ "Build an image from a Dockerfile"
+    end
+
+    test "build_image builds an image from a trivial Dockerfile" do
+      unique = System.unique_integer([:positive])
+      dir = Path.join(System.tmp_dir(), "flame-it-build-#{unique}")
+      tag = "flame-it-build-#{unique}:test"
+
+      :ok = File.mkdir_p(dir)
+
+      on_exit(fn ->
+        {_output, _code} =
+          System.cmd("container", ["image", "delete", tag], stderr_to_stdout: true)
+
+        {:ok, _} = File.rm_rf(dir)
+      end)
+
+      dockerfile_path = Path.join(dir, "Dockerfile")
+      :ok = File.write(dockerfile_path, "FROM alpine:latest\n")
+
+      {_output, exit_code} = CLISystem.build_image(["-t", tag, dir])
+      assert exit_code == 0
     end
   end
 
