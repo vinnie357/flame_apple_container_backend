@@ -15,7 +15,7 @@ defmodule FLAME.AppleContainers.CLI.System do
 
   @impl true
   def run_container(args) do
-    System.cmd("container", ["run" | args], stderr_to_stdout: true)
+    System.cmd("container", ["run" | args])
   end
 
   @impl true
@@ -57,7 +57,7 @@ defmodule FLAME.AppleContainers.CLI.System do
 
   @impl true
   def build_image(args) do
-    System.cmd("container", ["image", "build" | args], stderr_to_stdout: true)
+    System.cmd("container", ["build" | args], stderr_to_stdout: true)
   end
 
   @impl true
