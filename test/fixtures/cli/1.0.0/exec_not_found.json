@@ -1,0 +1,6 @@
+{
+  "command": ["container", "exec", "nonexistent-fixture-1000", "echo", "test"],
+  "stdout": "Error: get failed: container nonexistent-fixture-1000 not found\n",
+  "exit_code": 1,
+  "notes": "1.0.0 BREAKING: error message format changed from 'notFound: ...' to 'get failed: container ... not found'"
+}
