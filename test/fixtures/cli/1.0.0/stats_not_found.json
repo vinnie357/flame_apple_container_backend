@@ -1,0 +1,6 @@
+{
+  "command": ["container", "stats", "nonexistent-fixture-1000", "--no-stream"],
+  "stdout": "Error: no such container: nonexistent-fixture-1000\n",
+  "exit_code": 1,
+  "notes": "1.0.0 BREAKING: error message format changed from 'notFound: \"no such container: ...\"' to 'no such container: ...'"
+}

@@ -1,0 +1,6 @@
+{
+  "command": ["container", "inspect", "nonexistent-fixture-1000"],
+  "stdout": "Error: container not found: nonexistent-fixture-1000\n",
+  "exit_code": 1,
+  "notes": "1.0.0 BREAKING: returns exit code 1 with error message (0.9.0 returned exit code 0 with empty array [])"
+}
