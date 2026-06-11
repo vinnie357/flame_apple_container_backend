@@ -15,7 +15,7 @@ defmodule FLAME.AppleContainers.CLI.System do
 
   @impl true
   def run_container(args) do
-    System.cmd("container", ["run" | args])
+    System.cmd("container", ["run" | args], stderr_to_stdout: true)
   end
 
   @impl true

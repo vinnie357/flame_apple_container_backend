@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `build_image/1` in `CLI.System` now invokes `container build` (top-level
   subcommand) instead of the removed `container image build` subcommand, which
   was dropped in Apple Container CLI 1.0.0.
+- `run_container/1` in `CLI.System` now passes `stderr_to_stdout: true` so that
+  CLI error output (printed to stderr by `container run`) is captured and
+  available in the return value; previously dropped stderr gutted failure
+  diagnostics in `FLAME.AppleContainersBackend.remote_boot/1`.
 
 ### Changed
 
