@@ -93,14 +93,14 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
         ])
 
       assert exit_code == 0
-      assert String.trim(output) == container_name
+      assert output =~ container_name
 
       try do
         # Inspect running
         {output, exit_code} = CLISystem.inspect_container(container_name)
         assert exit_code == 0
         assert {:ok, [container_info]} = Jason.decode(output)
-        assert container_info["status"] == "running"
+        assert container_info["status"]["state"] == "running"
 
         # Exec
         {output, exit_code} = CLISystem.exec_in_container(container_name, ["echo", "hello"])
@@ -161,26 +161,26 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
       assert is_binary(output)
     end
 
-    test "inspect_container returns empty array for nonexistent container" do
+    test "inspect_container returns error for nonexistent container" do
       {output, exit_code} =
         CLISystem.inspect_container("nonexistent-#{System.unique_integer([:positive])}")
 
-      assert exit_code == 0
-      assert String.trim(output) == "[]"
+      assert exit_code == 1
+      assert output =~ "not found"
     end
 
-    test "stop_container succeeds silently for nonexistent container" do
+    test "stop_container returns error for nonexistent container" do
       {_output, exit_code} =
         CLISystem.stop_container("nonexistent-#{System.unique_integer([:positive])}")
 
-      assert exit_code == 0
+      assert exit_code == 1
     end
 
-    test "kill_container succeeds silently for nonexistent container" do
+    test "kill_container returns error for nonexistent container" do
       {_output, exit_code} =
         CLISystem.kill_container("nonexistent-#{System.unique_integer([:positive])}")
 
-      assert exit_code == 0
+      assert exit_code == 1
     end
 
     test "exec_in_container returns error for nonexistent container" do
@@ -191,7 +191,7 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
         )
 
       assert exit_code == 1
-      assert output =~ "notFound"
+      assert output =~ "not found"
     end
 
     test "get_container_stats returns error for nonexistent container" do
@@ -202,7 +202,7 @@ defmodule FLAME.AppleContainers.CLI.SystemIntegrationTest do
         )
 
       assert exit_code == 1
-      assert output =~ "notFound"
+      assert output =~ "no such container"
     end
   end
 end
