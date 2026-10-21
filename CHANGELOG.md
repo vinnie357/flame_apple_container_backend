@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-21
+
+### Security
+
+- Added a `mix hex.audit` CI gate (`mise run audit:hex`, Hex 2.5.3 or newer). It
+  fails on any advisory or retirement not allow-listed in `mix.exs`
+  (`hex: [ignore_advisories: []]`) and on a stale allow-list entry.
+- Added a `mix deps.audit` CI gate (`mise run audit:deps`, mix_audit). It fails
+  on any finding not in `.mix-audit-ignore`, on a stale entry, on a missing or
+  unreadable `mix.lock`, on an empty advisory database, and when its
+  positive-control lock is not flagged.
+- Added `docs/security/advisory-exceptions.md`, the policy for allow-listing an
+  advisory with a STRIDE review, and `mise run audit:advisory-doc`, which fails
+  once an exception's review is overdue. Both allow-lists are empty.
+- Cleared 31 `mix hex.audit` advisories (bandit 11, mint 13, plug 4, req 2,
+  hpax 1) by updating dependencies. `mix hex.audit` and `mix deps.audit` now
+  report none.
+
 ### Fixed
 
 - `build_image/1` in `CLI.System` now invokes `container build` (top-level
@@ -19,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated dependencies: flame 0.5.3 to 0.5.4, telemetry 1.3.0 to 1.4.2, jason
+  1.4.4 to 1.4.5, and in dev bandit 1.10.3 to 1.13.1, plug 1.19.1 to 1.20.3
+  and tidewave 0.5.5 to 0.9.1 (constraint `~> 0.9`). flame 0.5.4 changes only
+  the TLS verification depth in `FLAME.FlyBackend`, which this backend does not
+  use.
+- req, mint, finch, nimble_pool and nimble_options are no longer locked; tidewave
+  0.9 no longer depends on them. tidewave 0.9 adds websock_adapter.
+- Added mix_audit (dev and test only) and pinned nushell 0.113.1 in mise for the
+  audit scripts.
+- CI pins its actions by commit SHA (checkout v7.0.1, mise-action v5.2.2, cache
+  v6.1.0), passes `GITHUB_TOKEN` to mise-action, and allows 10 minutes.
 - Integration test suite (`test/cli_system_integration_test.exs`) now requires
   container CLI 1.0.0+.
 - Added `test/fixtures/cli/1.0.0/` with read-only command captures from the

@@ -32,7 +32,7 @@ published as a Hex package.
 ## Development workflow
 
 This project uses [mise](https://mise.jdx.dev) to manage tool versions
-(Erlang, Elixir) and development tasks. Run `mise install` after cloning to
+(Erlang, Elixir, nushell) and development tasks. Run `mise install` after cloning to
 set up the correct tool versions automatically.
 
 ### Available mise tasks
@@ -49,7 +49,15 @@ Run `mise tasks` to see all available tasks. Key tasks:
 | `mise run lint` | Run credo linter | `mix credo --strict` |
 | `mise run docs` | Generate documentation | `mix docs` |
 | `mise run hex-build` | Build Hex package | `mix hex.build` |
-| **`mise run ci`** | **Full CI pipeline** | compile + format-check + test + lint |
+| `mise run audit:hex` | Fail on any Hex advisory or retirement not allow-listed in mix.exs, or a stale entry (needs network) | `nu scripts/hex-audit.nu` |
+| `mise run audit:deps` | Fail on any mix_audit finding not in `.mix-audit-ignore`, or a stale entry (needs network) | `nu scripts/deps-audit.nu` |
+| `mise run audit:advisory-doc` | Fail when an advisory exception's review is overdue | `nu scripts/advisory-doc.nu` |
+| `mise run test:hex-audit` | Tests for the hex.audit gate | `nu test/test-hex-audit.nu` |
+| `mise run test:hex-audit-offline` | audit:hex fails on a registry cache fallback | `nu test/test-hex-audit-offline.nu` |
+| `mise run test:deps-audit` | Tests for the deps.audit gate | `nu test/test-deps-audit.nu` |
+| `mise run test:audit-wiring` | Audit task wiring, allow-list parity and the exceptions doc structure | `nu test/test-audit-wiring.nu` |
+| `mise run test:advisory-doc` | Tests for the review-date check | `nu test/test-advisory-doc.nu` |
+| **`mise run ci`** | **Full CI pipeline** | secrets + lint + advisory audits and their tests + compile + test |
 
 ### Before committing
 
@@ -82,7 +90,8 @@ troubleshooting specific failures. The `ci` task is the authoritative check.
 ## Dependencies
 
 - Core: flame, jason, telemetry
-- Dev only: ex_doc, credo, tidewave, bandit
+- Dev only: ex_doc, credo, mix_audit, tidewave, bandit
+- Advisory exceptions: see `docs/security/advisory-exceptions.md`
 
 ## Landing the Plane (Session Completion)
 
