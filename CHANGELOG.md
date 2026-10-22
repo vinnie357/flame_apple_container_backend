@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-22
+
+### Security
+
+- Pinned Erlang/OTP 28.5.0.8 and Elixir 1.19.6 (`1.19.6-otp-28`) in
+  `mise.toml`. OTP 28.5.0.4 fixes CVE-2026-55953, 28.5.0.7 fixes
+  CVE-2026-89422, and 28.5.0.8 fixes CVE-2026-105236 and CVE-2026-94200.
+- Added `mise run audit:otp`, run by `mise run ci`. It fails when the
+  `mise.toml` erlang pin, the running ERTS, or the OTP in
+  `docs/examples/Dockerfile.flame` is below 28.5.0.8, or when the runtime or
+  image differs from the pin.
+- Added `.github/dependabot.yml` for weekly `mix` and `github-actions`
+  updates.
+
+### Changed
+
+- `docs/examples/Dockerfile.flame` builds on
+  `hexpm/elixir:1.19.6-erlang-28.5.0.8-alpine-3.24.3` and runs on
+  `alpine:3.24.3`, with `libstdc++` and `libgcc` added to the runtime stage.
+
 ## [0.1.1] - 2026-10-21
 
 ### Security

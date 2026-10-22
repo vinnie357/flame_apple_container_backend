@@ -16,7 +16,8 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A toolchain bump compiles Erlang/OTP on the first run, so allow headroom.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -28,14 +29,15 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Restore mix cache
+        # The otp28 prefix keeps restore-keys from restoring a _build compiled on an older OTP.
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             deps
             _build
-          key: mix-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          key: mix-otp28-${{ runner.os }}-${{ hashFiles('mix.lock') }}
           restore-keys: |
-            mix-${{ runner.os }}-
+            mix-otp28-${{ runner.os }}-
 
       - name: Run CI
         run: mise run ci

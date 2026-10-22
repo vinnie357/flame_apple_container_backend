@@ -1,0 +1,27 @@
+# Dependabot version updates (#18).
+#
+# List mix directories explicitly. NEVER use a glob such as "/**": it would
+# pick up the deliberately vulnerable positive-control fixture lock
+# (test/fixtures/deps_audit/positive_control/mix.lock) used by audit:deps,
+# and Dependabot would "fix" it, blinding the gate.
+#
+# Dependabot does not bump mise.toml tools or Dockerfile FROM tags;
+# mise run audit:otp guards those.
+version: 2
+updates:
+  - package-ecosystem: "mix"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      mix-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

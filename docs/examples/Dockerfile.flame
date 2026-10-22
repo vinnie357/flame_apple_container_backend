@@ -18,7 +18,8 @@
 #   PHX_SERVER     - "false" (workers don't serve HTTP)
 
 # --- Build stage ---
-FROM elixir:1.18-alpine AS builder
+# Pin matches mise.toml; `mise run audit:otp` fails when it drifts.
+FROM hexpm/elixir:1.19.6-erlang-28.5.0.8-alpine-3.24.3 AS builder
 
 RUN apk add --no-cache build-base git
 
@@ -38,9 +39,10 @@ COPY lib lib/
 RUN mix compile && mix release flame_worker
 
 # --- Runtime stage ---
-FROM alpine:3.21
+# Match the builder's alpine for musl/ABI compatibility.
+FROM alpine:3.24.3
 
-RUN apk add --no-cache openssl ncurses ca-certificates
+RUN apk add --no-cache openssl ncurses ca-certificates libstdc++ libgcc
 
 RUN addgroup -g 1001 flame && \
     adduser -u 1001 -G flame -s /bin/sh -D flame
