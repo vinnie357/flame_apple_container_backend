@@ -59,7 +59,7 @@ This project uses [mise](https://mise.jdx.dev) for tool management.
 After cloning, run:
 
 ```bash
-mise install    # Install Erlang 27 + Elixir 1.19
+mise install    # Install Erlang/OTP 28.5.0.8 + Elixir 1.19.6
 mise run deps   # Install dependencies
 mise run ci     # Run full CI pipeline (compile + format + test + lint)
 ```

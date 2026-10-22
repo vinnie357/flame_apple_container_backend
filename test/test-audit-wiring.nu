@@ -1,5 +1,6 @@
 #!/usr/bin/env nu
-# test-audit-wiring.nu — T2-T5: audit gate wiring, allow-list parity and the STRIDE doc.
+# test-audit-wiring.nu — T2-T7: audit gate wiring, allow-list parity, the STRIDE doc,
+# the OTP floor wiring and the Dependabot config.
 #
 # Reads files only; evaluates nothing. Each section runs even when an earlier
 # one fails, so one run reports every red section. Exits 1 on any failure.
@@ -43,6 +44,30 @@
 #   the analysis in place, and git history keeps past reviews. Nothing here
 #   requires keeping old reviews.
 # T5 no orphans: every `## <ID>` section in the doc is on both allow-lists.
+# T6 otp wiring (#18). Fails, never skips, when a target is missing:
+#   - mise.toml [tasks."audit:otp"] runs exactly
+#     `nu scripts/otp-audit.nu --image-file docs/examples/Dockerfile.flame` (no
+#     --floor override; this repo has no root Dockerfile, so the task names the
+#     example Dockerfile) and [tasks."test:otp-audit"] runs exactly
+#     `nu test/test-otp-audit.nu`; both are in tasks.ci.depends.
+#   - scripts/otp-audit.nu exists and has exactly one `const otp_floor` line,
+#     and it is exactly `const otp_floor = "28.5.0.8"` (raising the floor is a
+#     deliberate test change). The E2E default-floor pair in
+#     test/test-otp-audit.nu proves the const is the enforced default.
+#   - mise.toml pins tools.erlang == "28.5.0.8" and
+#     tools.elixir == "1.19.6-otp-28".
+#   - docs/examples/Dockerfile.flame: the first FROM is
+#     `hexpm/elixir:1.19.6-erlang-28.5.0.8-alpine-3.24.3 AS builder`, and the
+#     runtime FROM is `alpine:3.24.3`, the builder tag's alpine version.
+# T7 dependabot (#18). Fails, never skips, when the file is missing:
+#   - .github/dependabot.yml parses, `version` == 2.
+#   - exactly one `mix` entry, at ["/"] (`directory: "/"` or
+#     `directories: ["/"]`).
+#   - exactly one `github-actions` entry at ["/"].
+#   - both have schedule.interval == "weekly".
+#   - no directory value contains `*`: a glob such as `/**` would pick up the
+#     deliberately vulnerable positive-control fixture lock
+#     (test/fixtures/deps_audit/positive_control/mix.lock) and blind audit:deps.
 #
 # Doc sections: only `## ` headings outside fenced code blocks whose text
 # matches the advisory ID shape `^[A-Z][A-Z0-9]*(-[A-Za-z0-9]+)+$` start a
@@ -230,6 +255,20 @@ def doc-sections-fixture [] {
   assert (($got.0.subsections | where name == "Owner" | get 0.body) | str contains "Maintainer") "a subsection body must hold its lines"
 }
 
+# A mise task's `run` as a list: a string becomes [string]; missing is [].
+def run-list [task] {
+  let run = ($task | get -o run)
+  if $run == null { return [] }
+  if ($run | describe | str starts-with "list") { $run } else { [$run] }
+}
+
+# A dependabot update entry's directories: `directories`, else [`directory`].
+def update-dirs [u: record] {
+  let many = ($u | get -o directories)
+  let one = ($u | get -o directory)
+  if $many != null { $many } else if $one != null { [$one] } else { [] }
+}
+
 def t2-wiring [] {
   let tasks = (open ($root | path join "mise.toml") | get tasks)
   let deps_task = ($tasks | get -o "audit:deps")
@@ -328,6 +367,66 @@ def t5-orphans [] {
   }
 }
 
+def t6-otp-wiring [] {
+  let mise = (open ($root | path join "mise.toml"))
+  let tasks = ($mise | get -o tasks | default {})
+  let ci = ($tasks | get -o ci | default {} | get -o depends | default [])
+
+  let otp_task = ($tasks | get -o "audit:otp")
+  assert ($otp_task != null) "mise.toml must define [tasks.\"audit:otp\"]"
+  assert equal (run-list $otp_task) ["nu scripts/otp-audit.nu --image-file docs/examples/Dockerfile.flame"] "audit:otp must run exactly `nu scripts/otp-audit.nu --image-file docs/examples/Dockerfile.flame` (no --floor override)"
+  let test_task = ($tasks | get -o "test:otp-audit")
+  assert ($test_task != null) "mise.toml must define [tasks.\"test:otp-audit\"]"
+  assert equal (run-list $test_task) ["nu test/test-otp-audit.nu"] "test:otp-audit must run exactly `nu test/test-otp-audit.nu`"
+  for t in ["audit:otp" "test:otp-audit"] {
+    assert ($t in $ci) $"tasks.ci.depends must include ($t)"
+  }
+
+  let script = ($root | path join "scripts" "otp-audit.nu")
+  assert ($script | path exists) "scripts/otp-audit.nu must exist"
+  let floor_lines = (open --raw $script | lines | where {|l| $l =~ '^\s*const\s+otp_floor\b' })
+  assert equal ($floor_lines | length) 1 $"scripts/otp-audit.nu must have exactly one `const otp_floor` line, got: ($floor_lines)"
+  assert equal $floor_lines.0 'const otp_floor = "28.5.0.8"' "scripts/otp-audit.nu must set exactly `const otp_floor = \"28.5.0.8\"`"
+
+  let tools = ($mise | get -o tools | default {})
+  assert equal ($tools | get -o erlang) "28.5.0.8" "mise.toml must pin erlang = \"28.5.0.8\""
+  assert equal ($tools | get -o elixir) "1.19.6-otp-28" "mise.toml must pin elixir = \"1.19.6-otp-28\""
+
+  let df = ($root | path join "docs" "examples" "Dockerfile.flame")
+  assert ($df | path exists) "docs/examples/Dockerfile.flame must exist"
+  let froms = (open --raw $df | lines | where {|l| $l =~ '(?i)^\s*FROM\s+' } | each {|l| $l | str trim })
+  assert (($froms | length) >= 2) $"docs/examples/Dockerfile.flame must have a builder and a runtime FROM, got: ($froms)"
+  let builder = "hexpm/elixir:1.19.6-erlang-28.5.0.8-alpine-3.24.3"
+  assert equal $froms.0 $"FROM ($builder) AS builder" $"the first FROM must be `FROM ($builder) AS builder`"
+  let alpine = ($builder | parse --regex '-alpine-(?<v>[0-9.]+)$' | get 0.v)
+  assert equal ($froms | last) $"FROM alpine:($alpine)" $"the runtime FROM must be `FROM alpine:($alpine)`, the builder tag's alpine"
+}
+
+def t7-dependabot [] {
+  let file = ($root | path join ".github" "dependabot.yml")
+  assert ($file | path exists) ".github/dependabot.yml must exist"
+  let cfg = (open --raw $file | from yaml)
+  assert ($cfg != null) ".github/dependabot.yml must parse to a mapping"
+  assert equal ($cfg | get -o version) 2 ".github/dependabot.yml must have version: 2"
+  let updates = ($cfg | get -o updates | default [])
+
+  let mix = ($updates | where {|u| ($u | get -o "package-ecosystem") == "mix" })
+  assert equal ($mix | length) 1 "dependabot.yml must have exactly one mix entry"
+  assert equal (update-dirs $mix.0) ["/"] "the mix entry must cover exactly /"
+  assert equal ($mix.0 | get -o schedule | default {} | get -o interval) "weekly" "the mix entry must run weekly"
+
+  let gha = ($updates | where {|u| ($u | get -o "package-ecosystem") == "github-actions" })
+  assert equal ($gha | length) 1 "dependabot.yml must have exactly one github-actions entry"
+  assert equal (update-dirs $gha.0) ["/"] "the github-actions entry must be at /"
+  assert equal ($gha.0 | get -o schedule | default {} | get -o interval) "weekly" "the github-actions entry must run weekly"
+
+  for u in $updates {
+    for d in (update-dirs $u) {
+      assert (not ($d | str contains "*")) $"dependabot directory must not be a glob \(it would bump the positive-control fixture lock\): ($d)"
+    }
+  }
+}
+
 def main [] {
   let results = [
     {name: "T2 wiring", run: {|| t2-wiring }}
@@ -335,6 +434,8 @@ def main [] {
     {name: "T4 doc parity", run: {|| t4-doc }}
     {name: "T5 no orphans", run: {|| t5-orphans }}
     {name: "T5 fixture: doc-sections", run: {|| doc-sections-fixture }}
+    {name: "T6 otp wiring", run: {|| t6-otp-wiring }}
+    {name: "T7 dependabot", run: {|| t7-dependabot }}
   ] | each {|t|
     try {
       do $t.run

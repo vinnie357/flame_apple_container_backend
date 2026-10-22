@@ -2,8 +2,8 @@
 _.file = ".env"
 
 [tools]
-erlang = "27"
-elixir = "1.19.5-otp-27"
+erlang = "28.5.0.8"
+elixir = "1.19.6-otp-28"
 gitleaks = "latest"
 "github:nushell/nushell" = "0.113.1"
 
@@ -83,11 +83,19 @@ run = "nu test/test-deps-audit.nu"
 description = "Audit task wiring, allow-list parity between mix.exs and .mix-audit-ignore, and the STRIDE doc structure"
 run = "nu test/test-audit-wiring.nu"
 
+[tasks."audit:otp"]
+description = "Fail when the mise.toml erlang pin, the running ERTS, or the OTP in docs/examples/Dockerfile.flame is below the OTP floor (28.5.0.8), or the runtime or image differs from the pin"
+run = "nu scripts/otp-audit.nu --image-file docs/examples/Dockerfile.flame"
+
+[tasks."test:otp-audit"]
+description = "Fixture and fake-erl tests for scripts/otp-audit.nu"
+run = "nu test/test-otp-audit.nu"
+
 [tasks."test:advisory-doc"]
 description = "Tests for scripts/advisory-doc.nu review-date check"
 run = "nu test/test-advisory-doc.nu"
 
 [tasks.ci]
 description = "Run CI checks (secrets, lint, advisory audits and their tests, compile, test)"
-depends = ["secrets", "lint", "audit:hex", "audit:deps", "audit:advisory-doc", "test:hex-audit", "test:hex-audit-offline", "test:deps-audit", "test:audit-wiring", "test:advisory-doc"]
+depends = ["secrets", "lint", "audit:hex", "audit:deps", "audit:advisory-doc", "test:hex-audit", "test:hex-audit-offline", "test:deps-audit", "test:audit-wiring", "test:advisory-doc", "audit:otp", "test:otp-audit"]
 run = ["mix compile --warnings-as-errors", "mix test"]
